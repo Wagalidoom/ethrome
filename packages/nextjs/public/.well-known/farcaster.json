@@ -1,0 +1,20 @@
+{
+    "miniapp": {
+      "version": "1",
+      "name": "EthRome",
+      "iconUrl": "https://yoink.party/logo.png",
+      "homeUrl": "https://yoink.party/framesV2/",
+      "imageUrl": "https://yoink.party/framesV2/opengraph-image",
+      "buttonTitle": "Start",
+      "splashImageUrl": "https://yoink.party/logo.png",
+      "splashBackgroundColor": "#f5f0ec",
+      "requiredChains": [
+        "eip155:11155111"
+      ],
+      "requiredCapabilities": [
+        "actions.signIn",
+        "wallet.getEthereumProvider",
+        "actions.swapToken"
+      ]
+    }
+  }
