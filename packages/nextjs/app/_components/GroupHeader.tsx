@@ -18,4 +18,3 @@ export const GroupHeader = ({ name, createdDate }: GroupHeaderProps) => {
     </div>
   );
 };
-

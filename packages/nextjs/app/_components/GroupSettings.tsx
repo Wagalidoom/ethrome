@@ -6,12 +6,11 @@ import { GroupMembersList } from "./GroupMembersList";
 import type { GroupMember } from "./types";
 
 export const GroupSettings = () => {
-  
   const [members, setMembers] = useState<GroupMember[]>([
     {
       id: "1",
       name: "Sarah Johnson",
-      balance: 24.50,
+      balance: 24.5,
     },
     {
       id: "2",
@@ -33,7 +32,7 @@ export const GroupSettings = () => {
   ]);
 
   const handleRemoveMember = (id: string) => {
-    setMembers(members.filter(m => m.id !== id));
+    setMembers(members.filter((m) => m.id !== id));
   };
 
   const handleAddMembers = () => {
@@ -46,20 +45,11 @@ export const GroupSettings = () => {
     // Implement invite via link logic
   };
 
-  const membersForDropdown = members.map(m => ({
-    id: m.id,
-    name: m.name,
-  }));
-
   return (
     <div className="min-h-screen bg-base-300 text-white">
-
       {/* Content */}
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        <GroupHeader
-          name="Weekend Trip"
-          createdDate="Oct 15, 2024"
-        />
+        <GroupHeader name="Weekend Trip" createdDate="Oct 15, 2024" />
 
         <GroupMembersList
           members={members}
@@ -71,4 +61,3 @@ export const GroupSettings = () => {
     </div>
   );
 };
-

@@ -1,6 +1,6 @@
-import { PlusIcon, LinkIcon } from "@heroicons/react/24/outline";
-import { GroupMemberCard } from "./GroupMemberCard";
 import type { GroupMember } from "./types";
+import { LinkIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { GroupMemberCard } from "./GroupMemberCard";
 
 interface GroupMembersListProps {
   members: GroupMember[];
@@ -24,11 +24,7 @@ export const GroupMembersList = ({
 
       <div className="space-y-3">
         {members.map((member) => (
-          <GroupMemberCard
-            key={member.id}
-            member={member}
-            onRemove={onRemoveMember}
-          />
+          <GroupMemberCard key={member.id} member={member} onRemove={onRemoveMember} />
         ))}
       </div>
 
@@ -52,4 +48,3 @@ export const GroupMembersList = ({
     </div>
   );
 };
-

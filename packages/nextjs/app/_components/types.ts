@@ -13,4 +13,3 @@ export interface GroupInfo {
   createdDate: string;
   icon?: React.ReactNode;
 }
-

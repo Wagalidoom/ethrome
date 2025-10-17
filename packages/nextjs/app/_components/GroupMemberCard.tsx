@@ -1,5 +1,5 @@
-import { XMarkIcon } from "@heroicons/react/24/outline";
 import type { GroupMember } from "./types";
+import { XMarkIcon } from "@heroicons/react/24/outline";
 
 interface GroupMemberCardProps {
   member: GroupMember;
@@ -12,10 +12,10 @@ export const GroupMemberCard = ({ member, onRemove }: GroupMemberCardProps) => {
       return <span className="text-white font-medium">settled up</span>;
     }
     if (!member.balance || member.balance === 0) return null;
-    
+
     const amount = Math.abs(member.balance).toFixed(2);
     const isPositive = member.balance > 0;
-    
+
     return (
       <span className={`font-semibold ${isPositive ? "text-green-400" : "text-red-400"}`}>
         {isPositive ? `gets back $${amount}` : `owes $${amount}`}
@@ -24,43 +24,35 @@ export const GroupMemberCard = ({ member, onRemove }: GroupMemberCardProps) => {
   };
 
   return (
-    <div className={`
+    <div
+      className={`
       flex items-center justify-between p-4 rounded-xl border border-base-content/10
-      ${member.isCurrentUser 
-        ? "bg-gradient-to-br from-indigo-900/50 to-purple-900/50 border-2 border-indigo-500/30" 
-        : "bg-base-200"
-      }
-    `}>
+      ${member.isCurrentUser ? "bg-gradient-to-br from-indigo-900/50 to-purple-900/50 border-2 border-indigo-500/30" : "bg-base-200"}
+    `}
+    >
       <div className="flex items-center gap-3 flex-1">
         <div className="relative">
           <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
             {member.avatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={member.avatar} alt={member.name} className="w-full h-full object-cover" />
             ) : (
-              <span className="font-bold text-lg">
-                {member.name.charAt(0).toUpperCase()}
-              </span>
+              <span className="font-bold text-lg">{member.name.charAt(0).toUpperCase()}</span>
             )}
           </div>
         </div>
-        
+
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold truncate">
-              {member.name}
-            </h3>
+            <h3 className="font-semibold truncate">{member.name}</h3>
             {member.isOwner && (
-              <span className="px-2 py-0.5 text-xs font-medium bg-indigo-500 text-white rounded-full">
-                Owner
-              </span>
+              <span className="px-2 py-0.5 text-xs font-medium bg-indigo-500 text-white rounded-full">Owner</span>
             )}
           </div>
-          <div className="mt-1 text-sm">
-            {getBalanceText()}
-          </div>
+          <div className="mt-1 text-sm">{getBalanceText()}</div>
         </div>
       </div>
-      
+
       {!member.isCurrentUser && onRemove && (
         <button
           onClick={() => onRemove(member.id)}
@@ -73,4 +65,3 @@ export const GroupMemberCard = ({ member, onRemove }: GroupMemberCardProps) => {
     </div>
   );
 };
-
