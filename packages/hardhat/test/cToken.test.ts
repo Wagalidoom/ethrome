@@ -284,4 +284,112 @@ describe("cToken", function () {
       expect(clearCharlieBalance).to.equal(500000000n);
     });
   });
+
+  describe("Testing Functions", function () {
+    it("should mint tokens directly for testing", async function () {
+      const mintAmount = 300000000n; // 300 tokens with 6 decimals
+
+      // Mint directly to Alice without needing underlying token
+      await cTokenContract.mintForTesting(signers.alice.address, mintAmount);
+
+      // Check Alice's balance
+      const encryptedBalance = await cTokenContract.confidentialBalanceOf(signers.alice.address);
+      const clearBalance = await fhevm.userDecryptEuint(
+        FhevmType.euint64,
+        encryptedBalance,
+        cTokenAddress,
+        signers.alice
+      );
+      expect(clearBalance).to.equal(mintAmount);
+    });
+
+    it("should batch mint to multiple addresses", async function () {
+      const recipients = [signers.alice.address, signers.bob.address, signers.charlie.address];
+      const amounts = [100000000n, 200000000n, 300000000n]; // 100, 200, 300 tokens
+
+      // Batch mint
+      await cTokenContract.batchMintForTesting(recipients, amounts);
+
+      // Check each recipient's balance
+      for (let i = 0; i < recipients.length; i++) {
+        const encryptedBalance = await cTokenContract.confidentialBalanceOf(recipients[i]);
+        const signer = i === 0 ? signers.alice : i === 1 ? signers.bob : signers.charlie;
+        const clearBalance = await fhevm.userDecryptEuint(
+          FhevmType.euint64,
+          encryptedBalance,
+          cTokenAddress,
+          signer
+        );
+        expect(clearBalance).to.equal(amounts[i]);
+      }
+    });
+
+    it("should fail to mint to zero address", async function () {
+      await expect(
+        cTokenContract.mintForTesting(ethers.ZeroAddress, 100000000n)
+      ).to.be.revertedWith("Cannot mint to zero address");
+    });
+
+    it("should fail batch mint with mismatched arrays", async function () {
+      const recipients = [signers.alice.address, signers.bob.address];
+      const amounts = [100000000n]; // Only 1 amount for 2 recipients
+
+      await expect(
+        cTokenContract.batchMintForTesting(recipients, amounts)
+      ).to.be.revertedWith("Array length mismatch");
+    });
+
+    it("should allow anyone to mint for testing", async function () {
+      // Charlie (not owner) mints to himself
+      await cTokenContract.connect(signers.charlie).mintForTesting(signers.charlie.address, 500000000n);
+
+      const encryptedBalance = await cTokenContract.confidentialBalanceOf(signers.charlie.address);
+      const clearBalance = await fhevm.userDecryptEuint(
+        FhevmType.euint64,
+        encryptedBalance,
+        cTokenAddress,
+        signers.charlie
+      );
+      expect(clearBalance).to.equal(500000000n);
+    });
+
+    it("should work with transfers after minting for testing", async function () {
+      // Mint to Alice
+      await cTokenContract.mintForTesting(signers.alice.address, 500000000n);
+
+      // Transfer from Alice to Bob
+      const transferAmount = 100000000n;
+      const encryptedAmount = await fhevm
+        .createEncryptedInput(cTokenAddress, signers.alice.address)
+        .add64(transferAmount)
+        .encrypt();
+
+      await cTokenContract
+        .connect(signers.alice)
+        ["confidentialTransfer(address,bytes32,bytes)"](
+          signers.bob.address,
+          encryptedAmount.handles[0],
+          encryptedAmount.inputProof
+        );
+
+      // Verify balances
+      const aliceBalance = await cTokenContract.confidentialBalanceOf(signers.alice.address);
+      const clearAliceBalance = await fhevm.userDecryptEuint(
+        FhevmType.euint64,
+        aliceBalance,
+        cTokenAddress,
+        signers.alice
+      );
+      expect(clearAliceBalance).to.equal(400000000n); // 500 - 100
+
+      const bobBalance = await cTokenContract.confidentialBalanceOf(signers.bob.address);
+      const clearBobBalance = await fhevm.userDecryptEuint(
+        FhevmType.euint64,
+        bobBalance,
+        cTokenAddress,
+        signers.bob
+      );
+      expect(clearBobBalance).to.equal(100000000n);
+    });
+  });
 });

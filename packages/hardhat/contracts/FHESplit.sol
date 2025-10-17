@@ -72,6 +72,10 @@ contract FHESplit is SepoliaConfig {
     mapping(uint256 => mapping(address => address[])) private groupDebtors; // who owes you in this group
     mapping(uint256 => mapping(address => mapping(address => bool))) private hasDebtRelationship;
 
+    // Privacy: Encrypted membership tokens
+    mapping(uint256 => mapping(address => euint64)) private groupMemberToken; // groupId => member => encrypted token
+    uint64 private tokenCounter; // Counter for generating unique tokens
+
     // =============================================================
     //                           EVENTS
     // =============================================================
@@ -80,11 +84,11 @@ contract FHESplit is SepoliaConfig {
     event Deposit(address indexed user, uint256 timestamp);
     event Withdrawal(address indexed user, uint256 timestamp);
     event GroupCreated(uint256 indexed groupId, string name, address indexed creator);
-    event MemberAdded(uint256 indexed groupId, address indexed member);
-    event MemberRemoved(uint256 indexed groupId, address indexed member);
-    event ExpenseAdded(uint256 indexed expenseId, uint256 indexed groupId, address indexed payer, string description);
-    event TransferInGroup(uint256 indexed groupId, address indexed from, address indexed to);
-    event DebtSettled(uint256 indexed groupId, address indexed debtor, address indexed creditor);
+    event MemberAdded(uint256 indexed groupId, uint256 timestamp);
+    event MemberRemoved(uint256 indexed groupId, uint256 timestamp);
+    event ExpenseAdded(uint256 indexed expenseId, uint256 indexed groupId, string description, uint256 timestamp);
+    event TransferInGroup(uint256 indexed groupId, uint256 timestamp);
+    event DebtSettled(uint256 indexed groupId, uint256 timestamp);
 
     // =============================================================
     //                         MODIFIERS
@@ -103,6 +107,11 @@ contract FHESplit is SepoliaConfig {
 
     modifier groupExists(uint256 groupId) {
         require(groups[groupId].exists, "Group does not exist");
+        _;
+    }
+
+    modifier onlyUserOrBot(address user) {
+        require(msg.sender == user || msg.sender == xmtpBotAddress, "Not authorized");
         _;
     }
 
@@ -233,7 +242,7 @@ contract FHESplit is SepoliaConfig {
             _addMemberInternal(groupId, members[i]);
         }
 
-        emit GroupCreated(groupId, name, msg.sender);
+        emit GroupCreated(groupId, name, msg.sender); // Creator still visible as they initiated tx
         return groupId;
     }
 
@@ -242,7 +251,7 @@ contract FHESplit is SepoliaConfig {
     /// @param member The member address to add
     function addMember(uint256 groupId, address member) external onlyXMTPBot groupExists(groupId) {
         _addMemberInternal(groupId, member);
-        emit MemberAdded(groupId, member);
+        emit MemberAdded(groupId, block.timestamp);
     }
 
     /// @notice Internal function to add a member
@@ -253,6 +262,24 @@ contract FHESplit is SepoliaConfig {
         groupMembers[groupId].push(member);
         isGroupMember[groupId][member] = true;
         userGroups[member].push(groupId);
+
+        // Generate unique encrypted membership token
+        tokenCounter++;
+        euint64 memberToken = FHE.asEuint64(tokenCounter);
+        groupMemberToken[groupId][member] = memberToken;
+
+        // Set ACL: All group members can see this token
+        FHE.allowThis(memberToken);
+        FHE.allow(memberToken, member);
+        FHE.allow(memberToken, xmtpBotAddress);
+
+        // Allow all existing group members to see the new member's token
+        address[] memory existingMembers = groupMembers[groupId];
+        for (uint256 i = 0; i < existingMembers.length; i++) {
+            if (existingMembers[i] != member) {
+                FHE.allow(memberToken, existingMembers[i]);
+            }
+        }
     }
 
     /// @notice Remove a member from a group
@@ -262,6 +289,9 @@ contract FHESplit is SepoliaConfig {
         require(isGroupMember[groupId][member], "Not a member");
 
         isGroupMember[groupId][member] = false;
+
+        // Clear membership token (set to 0)
+        groupMemberToken[groupId][member] = FHE.asEuint64(0);
 
         // Remove from groupMembers array
         address[] storage members = groupMembers[groupId];
@@ -283,7 +313,7 @@ contract FHESplit is SepoliaConfig {
             }
         }
 
-        emit MemberRemoved(groupId, member);
+        emit MemberRemoved(groupId, block.timestamp);
     }
 
     // =============================================================
@@ -359,7 +389,7 @@ contract FHESplit is SepoliaConfig {
             }
         }
 
-        emit ExpenseAdded(expenseId, groupId, payer, description);
+        emit ExpenseAdded(expenseId, groupId, description, block.timestamp);
         return expenseId;
     }
 
@@ -418,18 +448,44 @@ contract FHESplit is SepoliaConfig {
         FHE.allow(platformBalances[to], to);
         FHE.allow(platformBalances[to], xmtpBotAddress);
 
-        emit TransferInGroup(groupId, msg.sender, to);
-        emit DebtSettled(groupId, msg.sender, to);
+        emit TransferInGroup(groupId, block.timestamp);
+        emit DebtSettled(groupId, block.timestamp);
     }
 
     // =============================================================
     //                      QUERY FUNCTIONS
     // =============================================================
 
-    /// @notice Get user's platform balance
+    /// @notice Internal helper: Check if caller has debt relationship with user in any group
+    /// @param user The user to check relationship with
+    /// @return True if there's a debt relationship
+    function _hasAnyDebtRelationship(address user) internal view returns (bool) {
+        if (msg.sender == user || msg.sender == xmtpBotAddress) {
+            return true;
+        }
+
+        // Check all user's groups for debt relationships
+        uint256[] memory userGroupsList = userGroups[user];
+        for (uint256 i = 0; i < userGroupsList.length; i++) {
+            uint256 groupId = userGroupsList[i];
+            if (hasDebtRelationship[groupId][user][msg.sender] ||
+                hasDebtRelationship[groupId][msg.sender][user]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @notice Get user's platform balance (restricted access)
     /// @param user The user address
     /// @return The encrypted balance
     function getPlatformBalance(address user) external view returns (euint64) {
+        require(
+            msg.sender == user ||
+            msg.sender == xmtpBotAddress ||
+            _hasAnyDebtRelationship(user),
+            "Not authorized to view balance"
+        );
         return platformBalances[user];
     }
 
@@ -440,6 +496,12 @@ contract FHESplit is SepoliaConfig {
     /// @return The encrypted amount owed
     function getNetOwedInGroup(uint256 groupId, address debtor, address creditor)
         external view groupExists(groupId) returns (euint64) {
+        require(
+            msg.sender == debtor ||
+            msg.sender == creditor ||
+            msg.sender == xmtpBotAddress,
+            "Not authorized to view this debt"
+        );
         return groupNetOwed[groupId][debtor][creditor];
     }
 
@@ -449,6 +511,12 @@ contract FHESplit is SepoliaConfig {
     /// @return Array of creditor addresses
     function getCreditorsInGroup(uint256 groupId, address user)
         external view groupExists(groupId) returns (address[] memory) {
+        require(
+            msg.sender == user ||
+            msg.sender == xmtpBotAddress ||
+            isGroupMember[groupId][msg.sender],
+            "Not authorized"
+        );
         return groupCreditors[groupId][user];
     }
 
@@ -458,6 +526,12 @@ contract FHESplit is SepoliaConfig {
     /// @return Array of debtor addresses
     function getDebtorsInGroup(uint256 groupId, address user)
         external view groupExists(groupId) returns (address[] memory) {
+        require(
+            msg.sender == user ||
+            msg.sender == xmtpBotAddress ||
+            isGroupMember[groupId][msg.sender],
+            "Not authorized"
+        );
         return groupDebtors[groupId][user];
     }
 
@@ -475,10 +549,15 @@ contract FHESplit is SepoliaConfig {
         return groups[groupId];
     }
 
-    /// @notice Get all members of a group
+    /// @notice Get all members of a group (restricted to group members only)
     /// @param groupId The group ID
     /// @return Array of member addresses
     function getGroupMembers(uint256 groupId) external view groupExists(groupId) returns (address[] memory) {
+        require(
+            isGroupMember[groupId][msg.sender] ||
+            msg.sender == xmtpBotAddress,
+            "Only group members can view members"
+        );
         return groupMembers[groupId];
     }
 
@@ -524,5 +603,138 @@ contract FHESplit is SepoliaConfig {
     /// @return The total expense count
     function getExpenseCount() external view returns (uint256) {
         return expenseCounter;
+    }
+
+    // =============================================================
+    //                  CROSS-GROUP DEBT QUERIES
+    // =============================================================
+
+    /// @notice Get all groups where user has debt relationships (as debtor or creditor)
+    /// @param user The user address
+    /// @return Array of group IDs where user has active debts
+    function getMyGroupsWithDebts(address user) external view onlyUserOrBot(user) returns (uint256[] memory) {
+        uint256[] memory userGroupsList = userGroups[user];
+        uint256[] memory tempGroups = new uint256[](userGroupsList.length);
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < userGroupsList.length; i++) {
+            uint256 groupId = userGroupsList[i];
+
+            // Check if user has any creditors or debtors in this group
+            if (groupCreditors[groupId][user].length > 0 || groupDebtors[groupId][user].length > 0) {
+                tempGroups[count] = groupId;
+                count++;
+            }
+        }
+
+        // Create result array with exact size
+        uint256[] memory result = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = tempGroups[i];
+        }
+
+        return result;
+    }
+
+    /// @notice Get all creditors across all groups (people you owe money to)
+    /// @dev Returns parallel arrays of groupIds and creditor addresses
+    /// @param user The user address
+    /// @return groupIds Array of group IDs
+    /// @return creditors Array of creditor addresses corresponding to each group
+    function getAllMyCreditors(address user)
+        external
+        view
+        onlyUserOrBot(user)
+        returns (uint256[] memory groupIds, address[][] memory creditors)
+    {
+        uint256[] memory userGroupsList = userGroups[user];
+
+        // First pass: count groups with creditors
+        uint256 count = 0;
+        for (uint256 i = 0; i < userGroupsList.length; i++) {
+            uint256 groupId = userGroupsList[i];
+            if (groupCreditors[groupId][user].length > 0) {
+                count++;
+            }
+        }
+
+        // Initialize result arrays
+        groupIds = new uint256[](count);
+        creditors = new address[][](count);
+
+        // Second pass: populate results
+        uint256 index = 0;
+        for (uint256 i = 0; i < userGroupsList.length; i++) {
+            uint256 groupId = userGroupsList[i];
+            address[] memory groupCreds = groupCreditors[groupId][user];
+
+            if (groupCreds.length > 0) {
+                groupIds[index] = groupId;
+                creditors[index] = groupCreds;
+                index++;
+            }
+        }
+
+        return (groupIds, creditors);
+    }
+
+    /// @notice Get all debtors across all groups (people who owe you money)
+    /// @dev Returns parallel arrays of groupIds and debtor addresses
+    /// @param user The user address
+    /// @return groupIds Array of group IDs
+    /// @return debtors Array of debtor addresses corresponding to each group
+    function getAllMyDebtors(address user)
+        external
+        view
+        onlyUserOrBot(user)
+        returns (uint256[] memory groupIds, address[][] memory debtors)
+    {
+        uint256[] memory userGroupsList = userGroups[user];
+
+        // First pass: count groups with debtors
+        uint256 count = 0;
+        for (uint256 i = 0; i < userGroupsList.length; i++) {
+            uint256 groupId = userGroupsList[i];
+            if (groupDebtors[groupId][user].length > 0) {
+                count++;
+            }
+        }
+
+        // Initialize result arrays
+        groupIds = new uint256[](count);
+        debtors = new address[][](count);
+
+        // Second pass: populate results
+        uint256 index = 0;
+        for (uint256 i = 0; i < userGroupsList.length; i++) {
+            uint256 groupId = userGroupsList[i];
+            address[] memory groupDebs = groupDebtors[groupId][user];
+
+            if (groupDebs.length > 0) {
+                groupIds[index] = groupId;
+                debtors[index] = groupDebs;
+                index++;
+            }
+        }
+
+        return (groupIds, debtors);
+    }
+
+    /// @notice Get encrypted membership token for verification
+    /// @param groupId The group ID
+    /// @param member The member address
+    /// @return The encrypted membership token
+    function getGroupMemberToken(uint256 groupId, address member)
+        external
+        view
+        groupExists(groupId)
+        returns (euint64)
+    {
+        require(
+            isGroupMember[groupId][msg.sender] ||
+            msg.sender == xmtpBotAddress,
+            "Only group members can view tokens"
+        );
+        return groupMemberToken[groupId][member];
     }
 }
