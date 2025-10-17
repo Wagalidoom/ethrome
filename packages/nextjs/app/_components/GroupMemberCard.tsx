@@ -49,9 +49,9 @@ export const GroupMemberCard = ({ member, onRemove }: GroupMemberCardProps) => {
             <h3 className="font-semibold truncate">
               {member.name}
             </h3>
-            {member.isAdmin && (
+            {member.isOwner && (
               <span className="px-2 py-0.5 text-xs font-medium bg-indigo-500 text-white rounded-full">
-                Admin
+                Owner
               </span>
             )}
           </div>

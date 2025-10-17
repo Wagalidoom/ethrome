@@ -4,7 +4,7 @@ export interface GroupMember {
   avatar?: string;
   balance?: number;
   isCurrentUser?: boolean;
-  isAdmin?: boolean;
+  isOwner?: boolean;
 }
 
 export interface GroupInfo {

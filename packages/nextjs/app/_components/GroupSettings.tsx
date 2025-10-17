@@ -28,7 +28,7 @@ export const GroupSettings = () => {
       name: "You",
       balance: 0,
       isCurrentUser: true,
-      isAdmin: true,
+      isOwner: true,
     },
   ]);
 
