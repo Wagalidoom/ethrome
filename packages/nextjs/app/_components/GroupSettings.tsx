@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ExpensesHistory } from "./ExpensesHistory";
 import { GroupHeader } from "./GroupHeader";
 import { GroupMembersList } from "./GroupMembersList";
-import { ExpensesHistory } from "./ExpensesHistory";
-import type { GroupMember, ExpenseWithShares } from "./types";
+import type { ExpenseWithShares, GroupMember } from "./types";
 import { useFhevm } from "@fhevm-sdk";
 import { useAccount } from "wagmi";
 import { useFHESplitWagmi } from "~~/hooks/fhesplit/useFHESplitWagmi";
@@ -21,10 +21,7 @@ export const GroupSettings = () => {
 
   const initialMockChains = { 31337: "http://localhost:8545" };
 
-  const {
-    instance: fhevmInstance,
-    status: fhevmStatus,
-  } = useFhevm({
+  const { instance: fhevmInstance } = useFhevm({
     provider,
     chainId,
     initialMockChains,
@@ -163,7 +160,7 @@ export const GroupSettings = () => {
     const success = await fheSplit.removeMember(memberAddress);
     if (success) {
       // Update local state
-      setMembers(members.filter((m) => m.id !== id));
+      setMembers(members.filter(m => m.id !== id));
     }
   };
 
@@ -185,7 +182,7 @@ export const GroupSettings = () => {
         balance: 0,
       };
       setMembers([...members, newMember]);
-      
+
       // Close modal and reset
       setIsAddMemberModalOpen(false);
       setNewMemberAddress("");
@@ -237,23 +234,19 @@ export const GroupSettings = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-base-200 rounded-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-xl font-bold mb-4">Add Group Member</h3>
-            
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-2">
-                  Member Address
-                </label>
+                <label className="block text-sm font-medium mb-2">Member Address</label>
                 <input
                   type="text"
                   value={newMemberAddress}
-                  onChange={(e) => setNewMemberAddress(e.target.value)}
+                  onChange={e => setNewMemberAddress(e.target.value)}
                   placeholder="0x..."
                   className="w-full px-4 py-2 bg-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   disabled={fheSplit.isProcessing}
                 />
-                <p className="text-xs text-base-content/50 mt-1">
-                  Enter the Ethereum address of the member to add
-                </p>
+                <p className="text-xs text-base-content/50 mt-1">Enter the Ethereum address of the member to add</p>
               </div>
 
               <div className="flex gap-3">

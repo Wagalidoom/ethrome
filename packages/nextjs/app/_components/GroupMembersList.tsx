@@ -1,6 +1,6 @@
+import { GroupMemberCard } from "./GroupMemberCard";
 import type { GroupMember } from "./types";
 import { LinkIcon, PlusIcon } from "@heroicons/react/24/outline";
-import { GroupMemberCard } from "./GroupMemberCard";
 
 interface GroupMembersListProps {
   members: GroupMember[];
@@ -9,12 +9,7 @@ interface GroupMembersListProps {
   onInviteViaLink?: () => void;
 }
 
-export const GroupMembersList = ({
-  members,
-  onRemoveMember,
-  onAddMembers,
-  onInviteViaLink,
-}: GroupMembersListProps) => {
+export const GroupMembersList = ({ members, onRemoveMember, onAddMembers, onInviteViaLink }: GroupMembersListProps) => {
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -23,7 +18,7 @@ export const GroupMembersList = ({
       </div>
 
       <div className="space-y-3">
-        {members.map((member) => (
+        {members.map(member => (
           <GroupMemberCard key={member.id} member={member} onRemove={onRemoveMember} />
         ))}
       </div>

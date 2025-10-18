@@ -23,12 +23,10 @@ export const useFHESplitWagmi = (parameters: {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
   // Helpers
-  // const hasContract = Boolean(fheSplit?.address && fheSplit?.abi);
   const hasProvider = Boolean(ethersReadonlyProvider);
   const hasSigner = Boolean(ethersSigner);
 
   const getContract = (mode: "read" | "write") => {
-    // if (!hasContract) return undefined;
     const providerOrSigner = mode === "read" ? ethersReadonlyProvider : ethersSigner;
     if (!providerOrSigner) return undefined;
     return new ethers.Contract(FHESplitAddress, FHESplit_ABI, providerOrSigner);
