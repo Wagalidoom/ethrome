@@ -234,11 +234,82 @@ async function main() {
   printInfo(`Group 1 "${group1.name}" has ${group1MembersQueried.length} members`, 2);
 
   // ==========================================
-  printSection(4, "Adding Member to Group", "➕");
+  printSection(4, "Lazy Group Creation via Expense", "🚀");
   // ==========================================
 
-  printInfo("David wants to join 'Roommates' group");
-  printInfo("Only group creator (Alice) can add members", 2);
+  printInfo("Demonstrating lazy group creation: Creating Group 3 by adding expense directly");
+  printInfo("No need to call createGroup() first!", 2);
+
+  const group3Id = 3n;
+  const group3Members = [charlie.address, david.address];
+  const group3Shares = [75000000n, 75000000n]; // 75 each
+
+  let encryptedShares = [];
+  let proofs = [];
+  for (const share of group3Shares) {
+    const encrypted = await fhevm
+      .createEncryptedInput(fheSplitAddress, charlie.address)
+      .add64(share)
+      .encrypt();
+    encryptedShares.push(encrypted.handles[0]);
+    proofs.push(encrypted.inputProof);
+  }
+
+  // Add expense directly - group will be created automatically
+  await fheSplit
+    .connect(charlie)
+    .addExpense(group3Id, charlie.address, group3Members, encryptedShares, proofs, "Game night 🎮");
+
+  printSuccess("Group 3 created automatically via expense!");
+
+  const group3 = await fheSplit.getGroup(group3Id);
+  printInfo(`Group name: "${group3.name}"`, 2);
+  printInfo(`Creator: ${getUserName(group3.creator, userNames)} (the payer)`, 2);
+
+  const group3MembersQueried = await fheSplit.connect(charlie).getGroupMembers(group3Id);
+  printInfo(`Members: ${group3MembersQueried.length} (Charlie, David)`, 2);
+
+  // ==========================================
+  printSection(5, "Auto-Adding Members via Expense", "➕");
+  // ==========================================
+
+  printInfo("Adding Alice to 'Weekend Trip' group by including her in an expense");
+  printInfo("No explicit addMember() call needed!", 2);
+
+  const initialGroup2Members = await fheSplit.connect(bob).getGroupMembers(group2Id);
+  printInfo(`Weekend Trip currently has ${initialGroup2Members.length} members`, 2);
+
+  // Add expense that includes Alice (who is not in group 2)
+  const expandedMembers = [alice.address, bob.address];
+  const expandedShares = [80000000n, 80000000n]; // 80 each
+
+  encryptedShares = [];
+  proofs = [];
+  for (const share of expandedShares) {
+    const encrypted = await fhevm
+      .createEncryptedInput(fheSplitAddress, bob.address)
+      .add64(share)
+      .encrypt();
+    encryptedShares.push(encrypted.handles[0]);
+    proofs.push(encrypted.inputProof);
+  }
+
+  await fheSplit
+    .connect(bob)
+    .addExpense(group2Id, bob.address, expandedMembers, encryptedShares, proofs, "Restaurant dinner 🍽️");
+
+  printSuccess("Alice automatically added to Weekend Trip group!");
+
+  const expandedGroup2Members = await fheSplit.connect(bob).getGroupMembers(group2Id);
+  printInfo(`Weekend Trip now has ${expandedGroup2Members.length} members`, 2);
+  printInfo("Alice can now participate in all group activities", 2);
+
+  // ==========================================
+  printSection(6, "Traditional Group Management", "👥");
+  // ==========================================
+
+  printInfo("You can still manage groups the traditional way (creator only)");
+  printInfo("David wants to join 'Roommates' group", 2);
 
   await fheSplit.connect(alice).addMember(group1Id, david.address);
   printSuccess("David added to Roommates group by Alice (creator)");
@@ -251,7 +322,7 @@ async function main() {
   printInfo(`David is now in ${davidGroups.length} group(s)`, 2);
 
   // ==========================================
-  printSection(5, "Adding Expenses in Multiple Groups", "💵");
+  printSection(7, "Adding Expenses in Multiple Groups", "💵");
   // ==========================================
 
   // ===== GROUP 1: Roommates Expenses =====
@@ -261,8 +332,8 @@ async function main() {
   const exp1Members = [alice.address, bob.address, charlie.address, david.address];
   const exp1Shares = [100000000n, 100000000n, 100000000n, 100000000n]; // 100 each
 
-  let encryptedShares = [];
-  let proofs = [];
+  encryptedShares = [];
+  proofs = [];
   for (const share of exp1Shares) {
     const encrypted = await fhevm
       .createEncryptedInput(fheSplitAddress, alice.address)
@@ -327,7 +398,7 @@ async function main() {
   printInfo("Alice paid 200, Bob owes Alice 100", 2);
 
   // ==========================================
-  printSection(6, "Querying Debts (Single Group)", "📊");
+  printSection(8, "Querying Debts (Single Group)", "📊");
   // ==========================================
 
   printSubsection("Debts in Group 1 (Roommates)");
@@ -380,7 +451,7 @@ async function main() {
   await queryAndShowDebt(group2Id, bob, alice);
 
   // ==========================================
-  printSection(7, "Cross-Group Debt Queries", "🌐");
+  printSection(9, "Cross-Group Debt Queries", "🌐");
   // ==========================================
 
   printInfo("Frontend: Use these functions to show user's debts across ALL groups");
@@ -444,7 +515,7 @@ async function main() {
   }
 
   // ==========================================
-  printSection(8, "Auto-Settling Transfers", "💸");
+  printSection(10, "Auto-Settling Transfers", "💸");
   // ==========================================
 
   printInfo("Auto-settling: When you transfer to someone you owe, debt is settled first!");
@@ -506,7 +577,7 @@ async function main() {
   );
 
   // ==========================================
-  printSection(9, "Withdrawal from Platform", "💵");
+  printSection(11, "Withdrawal from Platform", "💵");
   // ==========================================
 
   printInfo("Charlie wants to withdraw 50 tokens from platform");
@@ -536,7 +607,7 @@ async function main() {
   printInfo(`Withdrew: ${formatAmount(withdrawAmount)} tokens`, 2);
 
   // ==========================================
-  printSection(10, "Privacy Features & Access Control", "🔒");
+  printSection(12, "Privacy Features & Access Control", "🔒");
   // ==========================================
 
   printInfo("Demonstrating privacy: What can and cannot be accessed");
@@ -621,7 +692,7 @@ async function main() {
   }
 
   // ==========================================
-  printSection(11, "Encrypted Membership Tokens", "🎫");
+  printSection(13, "Encrypted Membership Tokens", "🎫");
   // ==========================================
 
   printInfo("Each group member has an encrypted token for verification");
@@ -646,7 +717,7 @@ async function main() {
   }
 
   // ==========================================
-  printSection(12, "Querying Creditors & Debtors", "📋");
+  printSection(14, "Querying Creditors & Debtors", "📋");
   // ==========================================
 
   printInfo("Frontend: Use these to show 'who you owe' and 'who owes you'");
@@ -666,7 +737,7 @@ async function main() {
   });
 
   // ==========================================
-  printSection(13, "Expense History & Shares", "📜");
+  printSection(15, "Expense History & Shares", "📜");
   // ==========================================
 
   printSubsection("All Expenses in Group 1");
@@ -692,7 +763,7 @@ async function main() {
   }
 
   // ==========================================
-  printSection(14, "Final State Summary", "📊");
+  printSection(16, "Final State Summary", "📊");
   // ==========================================
 
   printSubsection("Platform Balances");
@@ -718,7 +789,7 @@ async function main() {
   }
 
   // ==========================================
-  printSection(15, "Frontend Integration Guide", "💻");
+  printSection(17, "Frontend Integration Guide", "💻");
   // ==========================================
 
   console.log(`
@@ -731,7 +802,7 @@ async function main() {
      • getPlatformBalance(user) - Query user's balance (returns encrypted)
 
   ✅ Group Management:
-     • createGroup(name, members) - Any user can create
+     • createGroup(name, members) - Any user can create (optional!)
      • addMember(groupId, member) - Creator only
      • removeMember(groupId, member) - Creator only
      • getGroupMembers(groupId) - Members only
@@ -739,8 +810,11 @@ async function main() {
      • getGroup(groupId) - Get group details
      • isMemberOfGroup(groupId, member) - Check membership
 
-  ✅ Expense Management:
-     • addExpense(groupId, payer, members, encryptedShares, proofs, description) - Group members only
+  ✅ Expense Management (with Lazy Group Creation):
+     • addExpense(groupId, payer, members, encryptedShares, proofs, description)
+       - Creates group automatically if it doesn't exist
+       - Adds new members automatically if they're not in the group
+       - No need to create group beforehand!
      • getGroupExpenses(groupId) - Get all expense IDs
      • getExpense(expenseId) - Get expense details
      • getExpenseShare(expenseId, member) - Get member's share (encrypted)
@@ -769,6 +843,8 @@ async function main() {
      • Handle access control errors gracefully (show appropriate UI)
      • Group creators manage membership (add/remove members)
      • Any group member can add expenses
+     • Leverage lazy group creation: Just add expenses, groups are created automatically!
+     • Members are auto-added when included in expenses
   `);
 
   // ==========================================
@@ -779,6 +855,8 @@ async function main() {
   🎯 Summary of Demonstrated Features:
 
   ✓ Multi-group creation and management
+  ✓ Lazy group creation via expenses (no upfront group creation needed!)
+  ✓ Auto-adding members when included in expenses
   ✓ Adding/removing members with encrypted tokens
   ✓ Expense tracking across multiple groups
   ✓ Single-group and cross-group debt queries

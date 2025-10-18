@@ -330,13 +330,15 @@ contract FHESplit is SepoliaConfig {
     // =============================================================
 
     /// @notice Add an expense to a group
-    /// @param groupId The group ID
+    /// @param groupId The group ID (will be created if doesn't exist)
     /// @param payer The person who paid
     /// @param members The members who share this expense
     /// @param encryptedShares The encrypted share amount for each member
     /// @param sharesProof The input proof for encrypted shares
     /// @param description Description of the expense
     /// @return expenseId The ID of the created expense
+    /// @dev Supports lazy group creation: If group doesn't exist, it will be created.
+    ///      If group exists, new members will be added automatically.
     function addExpense(
         uint256 groupId,
         address payer,
@@ -344,10 +346,39 @@ contract FHESplit is SepoliaConfig {
         externalEuint64[] memory encryptedShares,
         bytes[] memory sharesProof,
         string memory description
-    ) external onlyGroupMember(groupId) returns (uint256) {
-        require(isGroupMember[groupId][payer], "Payer not in group");
+    ) external returns (uint256) {
         require(members.length == encryptedShares.length, "Mismatched arrays");
         require(members.length == sharesProof.length, "Mismatched proofs");
+        require(members.length > 0, "No members in expense");
+
+        // Lazy group creation: Create group if it doesn't exist
+        if (!groups[groupId].exists) {
+            require(groupId == groupCounter + 1, "Invalid group ID for new group");
+            groupCounter++;
+
+            groups[groupId] = Group({
+                id: groupId,
+                name: string(abi.encodePacked("Group ", _uint2str(groupId))),
+                creator: payer,
+                createdAt: block.timestamp,
+                exists: true
+            });
+
+            emit GroupCreated(groupId, groups[groupId].name, payer);
+        }
+
+        // Ensure payer is in the group (add if not)
+        if (!isGroupMember[groupId][payer]) {
+            _addMemberInternal(groupId, payer);
+        }
+
+        // Ensure all members are in the group (add if not)
+        for (uint256 i = 0; i < members.length; i++) {
+            if (!isGroupMember[groupId][members[i]]) {
+                _addMemberInternal(groupId, members[i]);
+                emit MemberAdded(groupId, block.timestamp);
+            }
+        }
 
         expenseCounter++;
         uint256 expenseId = expenseCounter;
@@ -735,5 +766,34 @@ contract FHESplit is SepoliaConfig {
             "Only group members can view tokens"
         );
         return groupMemberToken[groupId][member];
+    }
+
+    // =============================================================
+    //                      INTERNAL HELPERS
+    // =============================================================
+
+    /// @notice Convert uint256 to string
+    /// @param _i The uint256 to convert
+    /// @return The string representation
+    function _uint2str(uint256 _i) internal pure returns (string memory) {
+        if (_i == 0) {
+            return "0";
+        }
+        uint256 j = _i;
+        uint256 len;
+        while (j != 0) {
+            len++;
+            j /= 10;
+        }
+        bytes memory bstr = new bytes(len);
+        uint256 k = len;
+        while (_i != 0) {
+            k = k - 1;
+            uint8 temp = (48 + uint8(_i - _i / 10 * 10));
+            bytes1 b1 = bytes1(temp);
+            bstr[k] = b1;
+            _i /= 10;
+        }
+        return string(bstr);
     }
 }
