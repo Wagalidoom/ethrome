@@ -704,6 +704,225 @@ describe("FHESplit", function () {
     });
   });
 
+  describe("Lazy Group Creation", function () {
+    it("should create group automatically when adding expense to non-existent group", async function () {
+      // Group ID 1 doesn't exist yet
+      const groupId = 1n;
+
+      const members = [signers.alice.address, signers.bob.address];
+      const shares = [50000000n, 50000000n]; // 50 each
+
+      const encryptedShares = [];
+      const proofs = [];
+      for (const share of shares) {
+        const encrypted = await fhevm
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
+          .add64(share)
+          .encrypt();
+        encryptedShares.push(encrypted.handles[0]);
+        proofs.push(encrypted.inputProof);
+      }
+
+      // Add expense without creating group first
+      await fheSplitContract
+        .connect(signers.alice)
+        .addExpense(groupId, signers.alice.address, members, encryptedShares, proofs, "Pizza");
+
+      // Verify group was created
+      expect(await fheSplitContract.getGroupCount()).to.equal(1);
+
+      const group = await fheSplitContract.getGroup(groupId);
+      expect(group.exists).to.be.true;
+      expect(group.creator).to.equal(signers.alice.address);
+      expect(group.name).to.equal("Group 1");
+
+      // Verify members were added
+      const groupMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(groupId);
+      expect(groupMembers.length).to.equal(2);
+      expect(groupMembers).to.include(signers.alice.address);
+      expect(groupMembers).to.include(signers.bob.address);
+
+      // Verify expense was created
+      expect(await fheSplitContract.getExpenseCount()).to.equal(1);
+    });
+
+    it("should add new members to existing group when adding expense", async function () {
+      // First create a group with Alice and Bob
+      const members = [signers.alice.address, signers.bob.address];
+      await fheSplitContract.connect(signers.alice).createGroup("TestGroup", members);
+      const groupId = 1n;
+
+      // Query initial members
+      const initialMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(groupId);
+      expect(initialMembers.length).to.equal(2);
+
+      // Add expense that includes Charlie (who is not in the group)
+      const expenseMembers = [signers.alice.address, signers.bob.address, signers.charlie.address];
+      const shares = [50000000n, 50000000n, 50000000n];
+
+      const encryptedShares = [];
+      const proofs = [];
+      for (const share of shares) {
+        const encrypted = await fhevm
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
+          .add64(share)
+          .encrypt();
+        encryptedShares.push(encrypted.handles[0]);
+        proofs.push(encrypted.inputProof);
+      }
+
+      await fheSplitContract
+        .connect(signers.alice)
+        .addExpense(groupId, signers.alice.address, expenseMembers, encryptedShares, proofs, "Dinner");
+
+      // Verify Charlie was added to the group
+      const updatedMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(groupId);
+      expect(updatedMembers.length).to.equal(3);
+      expect(updatedMembers).to.include(signers.charlie.address);
+
+      // Verify Charlie is marked as a member
+      expect(await fheSplitContract.isMemberOfGroup(groupId, signers.charlie.address)).to.be.true;
+    });
+
+    it("should add payer to group if not already a member", async function () {
+      // Create group with only Bob and Charlie
+      const members = [signers.bob.address, signers.charlie.address];
+      await fheSplitContract.connect(signers.bob).createGroup("TestGroup", members);
+      const groupId = 1n;
+
+      // Alice (not a member) adds an expense where she is the payer
+      const expenseMembers = [signers.alice.address, signers.bob.address];
+      const shares = [50000000n, 50000000n];
+
+      const encryptedShares = [];
+      const proofs = [];
+      for (const share of shares) {
+        const encrypted = await fhevm
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
+          .add64(share)
+          .encrypt();
+        encryptedShares.push(encrypted.handles[0]);
+        proofs.push(encrypted.inputProof);
+      }
+
+      // Alice should be able to add expense even though she's not in the group
+      await fheSplitContract
+        .connect(signers.alice)
+        .addExpense(groupId, signers.alice.address, expenseMembers, encryptedShares, proofs, "Groceries");
+
+      // Verify Alice was added to the group
+      const updatedMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(groupId);
+      expect(updatedMembers).to.include(signers.alice.address);
+      expect(await fheSplitContract.isMemberOfGroup(groupId, signers.alice.address)).to.be.true;
+    });
+
+    it("should fail when trying to create group with non-sequential ID", async function () {
+      // Try to create group with ID 5 when counter is at 0
+      const groupId = 5n;
+      const members = [signers.alice.address, signers.bob.address];
+      const shares = [50000000n, 50000000n];
+
+      const encryptedShares = [];
+      const proofs = [];
+      for (const share of shares) {
+        const encrypted = await fhevm
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
+          .add64(share)
+          .encrypt();
+        encryptedShares.push(encrypted.handles[0]);
+        proofs.push(encrypted.inputProof);
+      }
+
+      await expect(
+        fheSplitContract
+          .connect(signers.alice)
+          .addExpense(groupId, signers.alice.address, members, encryptedShares, proofs, "Pizza")
+      ).to.be.revertedWith("Invalid group ID for new group");
+    });
+
+    it("should handle multiple expenses creating and expanding groups", async function () {
+      // First expense creates group 1 with Alice and Bob
+      const group1Id = 1n;
+      let members = [signers.alice.address, signers.bob.address];
+      let shares = [50000000n, 50000000n];
+
+      let encryptedShares = [];
+      let proofs = [];
+      for (const share of shares) {
+        const encrypted = await fhevm
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
+          .add64(share)
+          .encrypt();
+        encryptedShares.push(encrypted.handles[0]);
+        proofs.push(encrypted.inputProof);
+      }
+
+      await fheSplitContract
+        .connect(signers.alice)
+        .addExpense(group1Id, signers.alice.address, members, encryptedShares, proofs, "First expense");
+
+      // Second expense in same group adds Charlie
+      members = [signers.alice.address, signers.bob.address, signers.charlie.address];
+      shares = [60000000n, 60000000n, 60000000n];
+
+      encryptedShares = [];
+      proofs = [];
+      for (const share of shares) {
+        const encrypted = await fhevm
+          .createEncryptedInput(fheSplitAddress, signers.bob.address)
+          .add64(share)
+          .encrypt();
+        encryptedShares.push(encrypted.handles[0]);
+        proofs.push(encrypted.inputProof);
+      }
+
+      await fheSplitContract
+        .connect(signers.bob)
+        .addExpense(group1Id, signers.bob.address, members, encryptedShares, proofs, "Second expense");
+
+      // Verify group has all three members
+      const groupMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(group1Id);
+      expect(groupMembers.length).to.equal(3);
+
+      // Create a new group via expense
+      const group2Id = 2n;
+      members = [signers.charlie.address, signers.deployer.address];
+      shares = [100000000n, 100000000n];
+
+      // Setup deployer first
+      await mockToken.mint(signers.deployer.address, ethers.parseUnits("1000", 6));
+      await mockToken.connect(signers.deployer).approve(cTokenAddress, ethers.parseUnits("500", 6));
+      await cTokenContract.connect(signers.deployer).wrap(signers.deployer.address, ethers.parseUnits("500", 6));
+      const until = Math.floor(Date.now() / 1000) + 3600;
+      await cTokenContract.connect(signers.deployer).setOperator(fheSplitAddress, until);
+      const depositAmount = 200000000n;
+      const encryptedDeposit = await fhevm
+        .createEncryptedInput(fheSplitAddress, signers.deployer.address)
+        .add64(depositAmount)
+        .encrypt();
+      await fheSplitContract.connect(signers.deployer).deposit(encryptedDeposit.handles[0], encryptedDeposit.inputProof);
+
+      encryptedShares = [];
+      proofs = [];
+      for (const share of shares) {
+        const encrypted = await fhevm
+          .createEncryptedInput(fheSplitAddress, signers.charlie.address)
+          .add64(share)
+          .encrypt();
+        encryptedShares.push(encrypted.handles[0]);
+        proofs.push(encrypted.inputProof);
+      }
+
+      await fheSplitContract
+        .connect(signers.charlie)
+        .addExpense(group2Id, signers.charlie.address, members, encryptedShares, proofs, "New group");
+
+      expect(await fheSplitContract.getGroupCount()).to.equal(2);
+      const group2 = await fheSplitContract.getGroup(group2Id);
+      expect(group2.creator).to.equal(signers.charlie.address);
+    });
+  });
+
   describe("Cross-Group Debt Queries", function () {
     let group1Id: bigint;
     let group2Id: bigint;
