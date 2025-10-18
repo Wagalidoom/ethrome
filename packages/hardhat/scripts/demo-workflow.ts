@@ -16,10 +16,12 @@
  * ✓ Encrypted membership tokens
  * ✓ All query functions
  *
- * Run with: npx hardhat run scripts/demo-workflow.ts --network localhost
+ * Run with:
+ *   Terminal 1: npx hardhat node
+ *   Terminal 2: npx hardhat run scripts/demo-workflow.ts --network localhost
  */
 
-import { ethers, fhevm, deployments } from "hardhat";
+import { ethers, fhevm } from "hardhat";
 import { FhevmType } from "@fhevm/hardhat-plugin";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
@@ -136,20 +138,31 @@ async function main() {
   printSection(1, "Contract Deployment", "📦");
   // ==========================================
 
-  await deployments.fixture(["MockToken", "cToken", "FHESplit"]);
+  printInfo("Deploying MockERC20...");
+  const MockTokenFactory = await ethers.getContractFactory("MockERC20");
+  const mockToken = await MockTokenFactory.connect(deployer).deploy("Mock USDT", "USDT", 6);
+  await mockToken.waitForDeployment();
+  const mockTokenAddress = await mockToken.getAddress();
+  printSuccess(`MockERC20 deployed to: ${mockTokenAddress}`);
 
-  const mockTokenDeployment = await deployments.get("MockERC20");
-  const cTokenDeployment = await deployments.get("cToken");
-  const fheSplitDeployment = await deployments.get("FHESplit");
+  printInfo("Deploying cToken...");
+  const CTokenFactory = await ethers.getContractFactory("cToken");
+  const cToken = await CTokenFactory.connect(deployer).deploy(mockTokenAddress, "Confidential USDT", "cUSDT");
+  await cToken.waitForDeployment();
+  const cTokenAddress = await cToken.getAddress();
+  printSuccess(`cToken deployed to: ${cTokenAddress}`);
 
-  const mockToken = await ethers.getContractAt("MockERC20", mockTokenDeployment.address);
-  const cToken = await ethers.getContractAt("cToken", cTokenDeployment.address);
-  const fheSplit = await ethers.getContractAt("FHESplit", fheSplitDeployment.address);
+  printInfo("Deploying FHESplit...");
+  const FHESplitFactory = await ethers.getContractFactory("FHESplit");
+  const fheSplit = await FHESplitFactory.connect(deployer).deploy(cTokenAddress);
+  await fheSplit.waitForDeployment();
+  const fheSplitAddress = await fheSplit.getAddress();
+  printSuccess(`FHESplit deployed to: ${fheSplitAddress}`);
 
-  printSuccess("Contracts deployed successfully");
-  printInfo(`MockERC20 (USDT): ${mockTokenDeployment.address}`);
-  printInfo(`cToken (Confidential): ${cTokenDeployment.address}`);
-  printInfo(`FHESplit (Main): ${fheSplitDeployment.address}`);
+  printSuccess("All contracts deployed successfully!");
+  printInfo(`MockERC20 (USDT): ${mockTokenAddress}`);
+  printInfo(`cToken (Confidential): ${cTokenAddress}`);
+  printInfo(`FHESplit (Main): ${fheSplitAddress}`);
 
   // ==========================================
   printSection(2, "User Token Setup", "💰");
@@ -172,26 +185,26 @@ async function main() {
     printSuccess(`Minted 1000 USDT`);
 
     // Approve and wrap 500 tokens
-    await mockToken.connect(user.signer).approve(cTokenDeployment.address, ethers.parseUnits("500", 6));
+    await mockToken.connect(user.signer).approve(cTokenAddress, ethers.parseUnits("500", 6));
     await cToken.connect(user.signer).wrap(user.signer.address, ethers.parseUnits("500", 6));
     printSuccess(`Wrapped 500 USDT → cToken (encrypted)`);
 
     // Approve FHESplit as operator
     const until = Math.floor(Date.now() / 1000) + 3600;
-    await cToken.connect(user.signer).setOperator(fheSplitDeployment.address, until);
+    await cToken.connect(user.signer).setOperator(fheSplitAddress, until);
     printSuccess(`Approved FHESplit as operator (valid for 1 hour)`);
 
     // Deposit to platform
     const depositAmount = 300000000n; // 300 tokens
     const encryptedDeposit = await fhevm
-      .createEncryptedInput(fheSplitDeployment.address, user.signer.address)
+      .createEncryptedInput(fheSplitAddress, user.signer.address)
       .add64(depositAmount)
       .encrypt();
     await fheSplit.connect(user.signer).deposit(encryptedDeposit.handles[0], encryptedDeposit.inputProof);
 
     // Verify balance
     const encryptedBalance = await fheSplit.connect(user.signer).getPlatformBalance(user.signer.address);
-    const clearBalance = await decryptAmount(encryptedBalance, fheSplitDeployment.address, user.signer);
+    const clearBalance = await decryptAmount(encryptedBalance, fheSplitAddress, user.signer);
     printSuccess(`Deposited ${formatAmount(clearBalance)} tokens to FHESplit`);
     printInfo(`Platform balance: ${formatAmount(clearBalance)} tokens`, 2);
   }
@@ -252,7 +265,7 @@ async function main() {
   let proofs = [];
   for (const share of exp1Shares) {
     const encrypted = await fhevm
-      .createEncryptedInput(fheSplitDeployment.address, alice.address)
+      .createEncryptedInput(fheSplitAddress, alice.address)
       .add64(share)
       .encrypt();
     encryptedShares.push(encrypted.handles[0]);
@@ -276,7 +289,7 @@ async function main() {
   proofs = [];
   for (const share of exp2Shares) {
     const encrypted = await fhevm
-      .createEncryptedInput(fheSplitDeployment.address, bob.address)
+      .createEncryptedInput(fheSplitAddress, bob.address)
       .add64(share)
       .encrypt();
     encryptedShares.push(encrypted.handles[0]);
@@ -300,7 +313,7 @@ async function main() {
   proofs = [];
   for (const share of exp3Shares) {
     const encrypted = await fhevm
-      .createEncryptedInput(fheSplitDeployment.address, alice.address)
+      .createEncryptedInput(fheSplitAddress, alice.address)
       .add64(share)
       .encrypt();
     encryptedShares.push(encrypted.handles[0]);
@@ -329,7 +342,7 @@ async function main() {
       const encryptedDebt = await fheSplit
         .connect(debtor)
         .getNetOwedInGroup(groupId, debtor.address, creditor.address);
-      const debtAmount = await decryptAmount(encryptedDebt, fheSplitDeployment.address, debtor);
+      const debtAmount = await decryptAmount(encryptedDebt, fheSplitAddress, debtor);
 
       if (debtAmount > 0n) {
         const debtorName = getUserName(debtor.address, userNames);
@@ -443,19 +456,19 @@ async function main() {
 
   const bobBalanceBefore = await decryptAmount(
     await fheSplit.connect(bob).getPlatformBalance(bob.address),
-    fheSplitDeployment.address,
+    fheSplitAddress,
     bob
   );
 
   const aliceBalanceBefore = await decryptAmount(
     await fheSplit.connect(alice).getPlatformBalance(alice.address),
-    fheSplitDeployment.address,
+    fheSplitAddress,
     alice
   );
 
   const transferAmount = 150000000n;
   const encryptedTransfer = await fhevm
-    .createEncryptedInput(fheSplitDeployment.address, bob.address)
+    .createEncryptedInput(fheSplitAddress, bob.address)
     .add64(transferAmount)
     .encrypt();
 
@@ -465,19 +478,19 @@ async function main() {
 
   const bobBalanceAfter = await decryptAmount(
     await fheSplit.connect(bob).getPlatformBalance(bob.address),
-    fheSplitDeployment.address,
+    fheSplitAddress,
     bob
   );
 
   const aliceBalanceAfter = await decryptAmount(
     await fheSplit.connect(alice).getPlatformBalance(alice.address),
-    fheSplitDeployment.address,
+    fheSplitAddress,
     alice
   );
 
   const bobDebtAfter = await decryptAmount(
     await fheSplit.connect(bob).getNetOwedInGroup(group1Id, bob.address, alice.address),
-    fheSplitDeployment.address,
+    fheSplitAddress,
     bob
   );
 
@@ -500,13 +513,13 @@ async function main() {
 
   const charlieBalanceBefore = await decryptAmount(
     await fheSplit.connect(charlie).getPlatformBalance(charlie.address),
-    fheSplitDeployment.address,
+    fheSplitAddress,
     charlie
   );
 
   const withdrawAmount = 50000000n;
   const encryptedWithdraw = await fhevm
-    .createEncryptedInput(fheSplitDeployment.address, charlie.address)
+    .createEncryptedInput(fheSplitAddress, charlie.address)
     .add64(withdrawAmount)
     .encrypt();
 
@@ -514,7 +527,7 @@ async function main() {
 
   const charlieBalanceAfter = await decryptAmount(
     await fheSplit.connect(charlie).getPlatformBalance(charlie.address),
-    fheSplitDeployment.address,
+    fheSplitAddress,
     charlie
   );
 
@@ -564,7 +577,7 @@ async function main() {
   try {
     // Bob has debt relationship with Alice in group 1
     const balance = await fheSplit.connect(bob).getPlatformBalance(alice.address);
-    const clearBalance = await decryptAmount(balance, fheSplitDeployment.address, bob);
+    const clearBalance = await decryptAmount(balance, fheSplitAddress, bob);
     printSuccess(`Bob can query Alice's balance (they have debt relationship)`);
     printInfo(`Alice's balance visible to Bob: ${formatAmount(clearBalance)} tokens`, 2);
   } catch (e) {
@@ -673,7 +686,7 @@ async function main() {
     // Query Alice's share
     const aliceShare = await fheSplit.connect(alice).getExpenseShare(expenseId, alice.address);
     if (aliceShare !== ethers.ZeroHash) {
-      const clearShare = await decryptAmount(aliceShare, fheSplitDeployment.address, alice);
+      const clearShare = await decryptAmount(aliceShare, fheSplitAddress, alice);
       printInfo(`Alice's share: ${formatAmount(clearShare)} tokens`, 3);
     }
   }
@@ -686,7 +699,7 @@ async function main() {
   for (const user of users) {
     const balance = await decryptAmount(
       await fheSplit.connect(user.signer).getPlatformBalance(user.signer.address),
-      fheSplitDeployment.address,
+      fheSplitAddress,
       user.signer
     );
     printInfo(`${user.name}: ${formatAmount(balance)} tokens`, 2);
