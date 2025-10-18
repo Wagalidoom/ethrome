@@ -8,6 +8,39 @@ import {cToken} from "./cToken.sol";
 /// @title FHESplit - Private Group-Based Expense Splitting Platform
 /// @notice Platform for creating groups, tracking expenses, and managing private token transfers with FHE
 /// @dev Uses Zama FHE for encrypted balances and group-scoped debt tracking
+///
+/// PRIVACY MODEL:
+/// ==============
+/// This contract provides AMOUNT PRIVACY using Fully Homomorphic Encryption (FHE):
+///
+/// ✅ ENCRYPTED (Full Privacy):
+///    - All user balances (euint64)
+///    - All debt amounts between users (euint64)
+///    - All expense share amounts (euint64)
+///    - Group membership tokens (euint64)
+///
+/// ⚠️  PLAINTEXT (Pseudonymous):
+///    - User addresses (required for mappings, transfers, and access control)
+///    - Group IDs (required for lookups and indexing)
+///    - Group names (metadata for user convenience)
+///
+/// WHY ADDRESSES CANNOT BE ENCRYPTED:
+/// -----------------------------------
+/// Ethereum addresses MUST be plaintext because:
+/// 1. Solidity mappings require plaintext keys: mapping(address => data)
+/// 2. Access control needs msg.sender comparisons: require(msg.sender == member)
+/// 3. Transfers need destination addresses: token.transfer(to, amount)
+/// 4. FHE.decrypt() is not available in smart contracts (requires Gateway/KMS)
+///
+/// TRADE-OFFS:
+/// -----------
+/// - Addresses visible in transaction calldata → Standard for blockchain (pseudonymous)
+/// - Financial amounts fully encrypted → Core privacy guarantee
+/// - Debt relationships visible (who owes whom) → Amounts remain private
+/// - Group membership visible → Transaction amounts remain private
+///
+/// This is the SAME privacy model used in our SecretPlatform contract.
+/// The key value proposition is AMOUNT PRIVACY, not address privacy.
 contract FHESplit is SepoliaConfig {
     // =============================================================
     //                           STRUCTS
@@ -36,9 +69,6 @@ contract FHESplit is SepoliaConfig {
 
     // The confidential token used for transfers
     cToken public immutable confidentialToken;
-
-    // XMTP bot address (only this address can manage groups/expenses)
-    address public xmtpBotAddress;
 
     // Platform balances: user => encrypted balance
     mapping(address => euint64) private platformBalances;
@@ -80,7 +110,6 @@ contract FHESplit is SepoliaConfig {
     //                           EVENTS
     // =============================================================
 
-    event BotAddressUpdated(address indexed oldBot, address indexed newBot);
     event Deposit(address indexed user, uint256 timestamp);
     event Withdrawal(address indexed user, uint256 timestamp);
     event GroupCreated(uint256 indexed groupId, string name, address indexed creator);
@@ -94,11 +123,6 @@ contract FHESplit is SepoliaConfig {
     //                         MODIFIERS
     // =============================================================
 
-    modifier onlyXMTPBot() {
-        // require(msg.sender == xmtpBotAddress, "Only XMTP bot can call this");
-        _;
-    }
-
     modifier onlyGroupMember(uint256 groupId) {
         require(groups[groupId].exists, "Group does not exist");
         require(isGroupMember[groupId][msg.sender], "Not a group member");
@@ -110,8 +134,9 @@ contract FHESplit is SepoliaConfig {
         _;
     }
 
-    modifier onlyUserOrBot(address user) {
-        require(msg.sender == user || msg.sender == xmtpBotAddress, "Not authorized");
+    modifier onlyCreator(uint256 groupId) {
+        require(groups[groupId].exists, "Group does not exist");
+        require(msg.sender == groups[groupId].creator, "Only group creator can call this");
         _;
     }
 
@@ -121,26 +146,14 @@ contract FHESplit is SepoliaConfig {
 
     /// @notice Constructor
     /// @param _confidentialToken Address of the cToken contract
-    /// @param _xmtpBotAddress Address of the XMTP bot
-    constructor(address _confidentialToken, address _xmtpBotAddress) {
+    constructor(address _confidentialToken) {
         require(_confidentialToken != address(0), "Invalid token address");
-        require(_xmtpBotAddress != address(0), "Invalid bot address");
         confidentialToken = cToken(_confidentialToken);
-        xmtpBotAddress = _xmtpBotAddress;
     }
 
     // =============================================================
     //                      ADMIN FUNCTIONS
     // =============================================================
-
-    /// @notice Update XMTP bot address (only callable by current bot)
-    /// @param newBotAddress The new bot address
-    function updateBotAddress(address newBotAddress) external onlyXMTPBot {
-        require(newBotAddress != address(0), "Invalid address");
-        address oldBot = xmtpBotAddress;
-        xmtpBotAddress = newBotAddress;
-        emit BotAddressUpdated(oldBot, newBotAddress);
-    }
 
     /// @notice Helper function to set this platform as operator for cToken transfers
     /// @param until Timestamp until when the operator permission is valid
@@ -168,7 +181,6 @@ contract FHESplit is SepoliaConfig {
         // Set ACL permissions
         FHE.allowThis(platformBalances[msg.sender]);
         FHE.allow(platformBalances[msg.sender], msg.sender);
-        FHE.allow(platformBalances[msg.sender], xmtpBotAddress);
 
         emit Deposit(msg.sender, block.timestamp);
     }
@@ -188,7 +200,6 @@ contract FHESplit is SepoliaConfig {
         // Set ACL permissions
         FHE.allowThis(platformBalances[msg.sender]);
         FHE.allow(platformBalances[msg.sender], msg.sender);
-        FHE.allow(platformBalances[msg.sender], xmtpBotAddress);
 
         // Transfer cToken back to user
         FHE.allowTransient(amount, address(confidentialToken));
@@ -208,7 +219,6 @@ contract FHESplit is SepoliaConfig {
         platformBalances[msg.sender] = FHE.asEuint64(0);
         FHE.allowThis(platformBalances[msg.sender]);
         FHE.allow(platformBalances[msg.sender], msg.sender);
-        FHE.allow(platformBalances[msg.sender], xmtpBotAddress);
 
         // Transfer cToken back to user
         FHE.allowTransient(amount, address(confidentialToken));
@@ -223,9 +233,9 @@ contract FHESplit is SepoliaConfig {
 
     /// @notice Create a new group
     /// @param name The name of the group
-    /// @param members Initial members of the group
+    /// @param members Initial members of the group (must include creator)
     /// @return groupId The ID of the created group
-    function createGroup(string memory name, address[] memory members) external onlyXMTPBot returns (uint256) {
+    function createGroup(string memory name, address[] memory members) external returns (uint256) {
         groupCounter++;
         uint256 groupId = groupCounter;
 
@@ -242,14 +252,14 @@ contract FHESplit is SepoliaConfig {
             _addMemberInternal(groupId, members[i]);
         }
 
-        emit GroupCreated(groupId, name, msg.sender); // Creator still visible as they initiated tx
+        emit GroupCreated(groupId, name, msg.sender);
         return groupId;
     }
 
     /// @notice Add a member to a group
     /// @param groupId The group ID
     /// @param member The member address to add
-    function addMember(uint256 groupId, address member) external onlyXMTPBot groupExists(groupId) {
+    function addMember(uint256 groupId, address member) external onlyCreator(groupId) {
         _addMemberInternal(groupId, member);
         emit MemberAdded(groupId, block.timestamp);
     }
@@ -271,7 +281,6 @@ contract FHESplit is SepoliaConfig {
         // Set ACL: All group members can see this token
         FHE.allowThis(memberToken);
         FHE.allow(memberToken, member);
-        FHE.allow(memberToken, xmtpBotAddress);
 
         // Allow all existing group members to see the new member's token
         address[] memory existingMembers = groupMembers[groupId];
@@ -285,7 +294,7 @@ contract FHESplit is SepoliaConfig {
     /// @notice Remove a member from a group
     /// @param groupId The group ID
     /// @param member The member address to remove
-    function removeMember(uint256 groupId, address member) external onlyXMTPBot groupExists(groupId) {
+    function removeMember(uint256 groupId, address member) external onlyCreator(groupId) {
         require(isGroupMember[groupId][member], "Not a member");
 
         isGroupMember[groupId][member] = false;
@@ -335,7 +344,7 @@ contract FHESplit is SepoliaConfig {
         externalEuint64[] memory encryptedShares,
         bytes[] memory sharesProof,
         string memory description
-    ) external onlyXMTPBot groupExists(groupId) returns (uint256) {
+    ) external onlyGroupMember(groupId) returns (uint256) {
         require(isGroupMember[groupId][payer], "Payer not in group");
         require(members.length == encryptedShares.length, "Mismatched arrays");
         require(members.length == sharesProof.length, "Mismatched proofs");
@@ -366,7 +375,6 @@ contract FHESplit is SepoliaConfig {
             FHE.allowThis(share);
             FHE.allow(share, member);
             FHE.allow(share, payer);
-            FHE.allow(share, xmtpBotAddress);
 
             // Update net owed if member is not the payer
             if (member != payer) {
@@ -374,11 +382,10 @@ contract FHESplit is SepoliaConfig {
                 euint64 currentDebt = groupNetOwed[groupId][member][payer];
                 groupNetOwed[groupId][member][payer] = FHE.add(currentDebt, share);
 
-                // Set ACL permissions
+                // Set ACL permissions: Only debtor and creditor can see this debt
                 FHE.allowThis(groupNetOwed[groupId][member][payer]);
                 FHE.allow(groupNetOwed[groupId][member][payer], member);
                 FHE.allow(groupNetOwed[groupId][member][payer], payer);
-                FHE.allow(groupNetOwed[groupId][member][payer], xmtpBotAddress);
 
                 // Track debt relationship
                 if (!hasDebtRelationship[groupId][member][payer]) {
@@ -426,11 +433,10 @@ contract FHESplit is SepoliaConfig {
         // Reduce the debt by settlement amount
         groupNetOwed[groupId][msg.sender][to] = FHE.sub(debt, settleAmount);
 
-        // Set ACL for updated debt
+        // Set ACL for updated debt: Only debtor and creditor can see this
         FHE.allowThis(groupNetOwed[groupId][msg.sender][to]);
         FHE.allow(groupNetOwed[groupId][msg.sender][to], msg.sender);
         FHE.allow(groupNetOwed[groupId][msg.sender][to], to);
-        FHE.allow(groupNetOwed[groupId][msg.sender][to], xmtpBotAddress);
 
         // Calculate remaining amount to transfer: amount - settleAmount
         euint64 remainingTransfer = FHE.sub(amount, settleAmount);
@@ -442,11 +448,9 @@ contract FHESplit is SepoliaConfig {
         // Set ACL permissions for balances
         FHE.allowThis(platformBalances[msg.sender]);
         FHE.allow(platformBalances[msg.sender], msg.sender);
-        FHE.allow(platformBalances[msg.sender], xmtpBotAddress);
 
         FHE.allowThis(platformBalances[to]);
         FHE.allow(platformBalances[to], to);
-        FHE.allow(platformBalances[to], xmtpBotAddress);
 
         emit TransferInGroup(groupId, block.timestamp);
         emit DebtSettled(groupId, block.timestamp);
@@ -460,7 +464,7 @@ contract FHESplit is SepoliaConfig {
     /// @param user The user to check relationship with
     /// @return True if there's a debt relationship
     function _hasAnyDebtRelationship(address user) internal view returns (bool) {
-        if (msg.sender == user || msg.sender == xmtpBotAddress) {
+        if (msg.sender == user) {
             return true;
         }
 
@@ -482,7 +486,6 @@ contract FHESplit is SepoliaConfig {
     function getPlatformBalance(address user) external view returns (euint64) {
         require(
             msg.sender == user ||
-            msg.sender == xmtpBotAddress ||
             _hasAnyDebtRelationship(user),
             "Not authorized to view balance"
         );
@@ -498,8 +501,7 @@ contract FHESplit is SepoliaConfig {
         external view groupExists(groupId) returns (euint64) {
         require(
             msg.sender == debtor ||
-            msg.sender == creditor ||
-            msg.sender == xmtpBotAddress,
+            msg.sender == creditor,
             "Not authorized to view this debt"
         );
         return groupNetOwed[groupId][debtor][creditor];
@@ -513,7 +515,6 @@ contract FHESplit is SepoliaConfig {
         external view groupExists(groupId) returns (address[] memory) {
         require(
             msg.sender == user ||
-            msg.sender == xmtpBotAddress ||
             isGroupMember[groupId][msg.sender],
             "Not authorized"
         );
@@ -528,7 +529,6 @@ contract FHESplit is SepoliaConfig {
         external view groupExists(groupId) returns (address[] memory) {
         require(
             msg.sender == user ||
-            msg.sender == xmtpBotAddress ||
             isGroupMember[groupId][msg.sender],
             "Not authorized"
         );
@@ -554,8 +554,7 @@ contract FHESplit is SepoliaConfig {
     /// @return Array of member addresses
     function getGroupMembers(uint256 groupId) external view groupExists(groupId) returns (address[] memory) {
         require(
-            isGroupMember[groupId][msg.sender] ||
-            msg.sender == xmtpBotAddress,
+            isGroupMember[groupId][msg.sender],
             "Only group members can view members"
         );
         return groupMembers[groupId];
@@ -612,7 +611,8 @@ contract FHESplit is SepoliaConfig {
     /// @notice Get all groups where user has debt relationships (as debtor or creditor)
     /// @param user The user address
     /// @return Array of group IDs where user has active debts
-    function getMyGroupsWithDebts(address user) external view onlyUserOrBot(user) returns (uint256[] memory) {
+    function getMyGroupsWithDebts(address user) external view returns (uint256[] memory) {
+        require(msg.sender == user, "Not authorized");
         uint256[] memory userGroupsList = userGroups[user];
         uint256[] memory tempGroups = new uint256[](userGroupsList.length);
         uint256 count = 0;
@@ -644,9 +644,9 @@ contract FHESplit is SepoliaConfig {
     function getAllMyCreditors(address user)
         external
         view
-        onlyUserOrBot(user)
         returns (uint256[] memory groupIds, address[][] memory creditors)
     {
+        require(msg.sender == user, "Not authorized");
         uint256[] memory userGroupsList = userGroups[user];
 
         // First pass: count groups with creditors
@@ -686,9 +686,9 @@ contract FHESplit is SepoliaConfig {
     function getAllMyDebtors(address user)
         external
         view
-        onlyUserOrBot(user)
         returns (uint256[] memory groupIds, address[][] memory debtors)
     {
+        require(msg.sender == user, "Not authorized");
         uint256[] memory userGroupsList = userGroups[user];
 
         // First pass: count groups with debtors
@@ -731,8 +731,7 @@ contract FHESplit is SepoliaConfig {
         returns (euint64)
     {
         require(
-            isGroupMember[groupId][msg.sender] ||
-            msg.sender == xmtpBotAddress,
+            isGroupMember[groupId][msg.sender],
             "Only group members can view tokens"
         );
         return groupMemberToken[groupId][member];

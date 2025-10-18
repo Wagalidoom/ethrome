@@ -11,20 +11,16 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   // Get cToken contract address
   const cToken = await get("cToken");
 
-  // Use deployer as XMTP bot address for testing (in production, use actual bot address)
-  const xmtpBotAddress = deployer;
-
   // Deploy FHESplit
   const fheSplit = await deploy("FHESplit", {
     from: deployer,
-    args: [cToken.address, xmtpBotAddress],
+    args: [cToken.address],
     log: true,
     deterministicDeployment: false,
   });
 
   console.log(`FHESplit deployed to: ${fheSplit.address}`);
   console.log(`cToken: ${cToken.address}`);
-  console.log(`XMTP Bot Address: ${xmtpBotAddress}`);
 
   // Log deployment summary
   const mockToken = await get("MockERC20");
@@ -34,7 +30,6 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   console.log(`MockERC20: ${mockToken.address}`);
   console.log(`cToken: ${cToken.address}`);
   console.log(`FHESplit: ${fheSplit.address}`);
-  console.log(`XMTP Bot: ${xmtpBotAddress}`);
   console.log("========================\n");
 };
 

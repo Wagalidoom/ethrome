@@ -13,7 +13,6 @@ import { FhevmType } from "@fhevm/hardhat-plugin";
 
 type Signers = {
   deployer: HardhatEthersSigner;
-  bot: HardhatEthersSigner;
   alice: HardhatEthersSigner;
   bob: HardhatEthersSigner;
   charlie: HardhatEthersSigner;
@@ -36,12 +35,9 @@ async function deployFixture() {
   )) as cToken;
   const cTokenAddress = await cTokenContract.getAddress();
 
-  // Deploy FHESplit (use deployer as bot for testing)
+  // Deploy FHESplit
   const fheSplitFactory = (await ethers.getContractFactory("FHESplit")) as FHESplit__factory;
-  const fheSplitContract = (await fheSplitFactory.deploy(
-    cTokenAddress,
-    signers[0].address // Bot address
-  )) as FHESplit;
+  const fheSplitContract = (await fheSplitFactory.deploy(cTokenAddress)) as FHESplit;
   const fheSplitAddress = await fheSplitContract.getAddress();
 
   return {
@@ -66,7 +62,6 @@ describe("FHESplit", function () {
     const ethSigners: HardhatEthersSigner[] = await ethers.getSigners();
     signers = {
       deployer: ethSigners[0],
-      bot: ethSigners[0], // Using deployer as bot
       alice: ethSigners[1],
       bob: ethSigners[2],
       charlie: ethSigners[3],
@@ -111,7 +106,6 @@ describe("FHESplit", function () {
   describe("Deployment", function () {
     it("should have correct initial configuration", async function () {
       expect(await fheSplitContract.confidentialToken()).to.equal(cTokenAddress);
-      expect(await fheSplitContract.xmtpBotAddress()).to.equal(signers.bot.address);
       expect(await fheSplitContract.getGroupCount()).to.equal(0);
       expect(await fheSplitContract.getExpenseCount()).to.equal(0);
     });
@@ -119,7 +113,7 @@ describe("FHESplit", function () {
 
   describe("Platform Operations", function () {
     it("should show correct platform balance after deposit", async function () {
-      const encryptedBalance = await fheSplitContract.getPlatformBalance(signers.alice.address);
+      const encryptedBalance = await fheSplitContract.connect(signers.alice).getPlatformBalance(signers.alice.address);
       const clearBalance = await fhevm.userDecryptEuint(
         FhevmType.euint64,
         encryptedBalance,
@@ -141,7 +135,7 @@ describe("FHESplit", function () {
         .connect(signers.alice)
         .withdraw(encryptedWithdraw.handles[0], encryptedWithdraw.inputProof);
 
-      const encryptedBalance = await fheSplitContract.getPlatformBalance(signers.alice.address);
+      const encryptedBalance = await fheSplitContract.connect(signers.alice).getPlatformBalance(signers.alice.address);
       const clearBalance = await fhevm.userDecryptEuint(
         FhevmType.euint64,
         encryptedBalance,
@@ -154,7 +148,7 @@ describe("FHESplit", function () {
     it("should withdraw all successfully", async function () {
       await fheSplitContract.connect(signers.alice).withdrawAll();
 
-      const encryptedBalance = await fheSplitContract.getPlatformBalance(signers.alice.address);
+      const encryptedBalance = await fheSplitContract.connect(signers.alice).getPlatformBalance(signers.alice.address);
       const clearBalance = await fhevm.userDecryptEuint(
         FhevmType.euint64,
         encryptedBalance,
@@ -169,52 +163,53 @@ describe("FHESplit", function () {
     it("should create group successfully", async function () {
       const members = [signers.alice.address, signers.bob.address, signers.charlie.address];
 
-      const tx = await fheSplitContract.connect(signers.bot).createGroup("Roommates", members);
+      const tx = await fheSplitContract.connect(signers.alice).createGroup("Roommates", members);
       await tx.wait();
 
       expect(await fheSplitContract.getGroupCount()).to.equal(1);
 
       const group = await fheSplitContract.getGroup(1);
       expect(group.name).to.equal("Roommates");
-      expect(group.creator).to.equal(signers.bot.address);
+      expect(group.creator).to.equal(signers.alice.address);
       expect(group.exists).to.be.true;
 
-      // Query as bot (has access)
-      const groupMembers = await fheSplitContract.connect(signers.bot).getGroupMembers(1);
+      // Query as member (has access)
+      const groupMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(1);
       expect(groupMembers.length).to.equal(3);
       expect(groupMembers).to.include(signers.alice.address);
       expect(groupMembers).to.include(signers.bob.address);
       expect(groupMembers).to.include(signers.charlie.address);
     });
 
-    it("should fail to create group if not bot", async function () {
+    it("should add member to existing group (only creator)", async function () {
       const members = [signers.alice.address, signers.bob.address];
+      await fheSplitContract.connect(signers.alice).createGroup("Roommates", members);
 
-      await expect(
-        fheSplitContract.connect(signers.alice).createGroup("Invalid", members)
-      ).to.be.revertedWith("Only XMTP bot can call this");
-    });
+      await fheSplitContract.connect(signers.alice).addMember(1, signers.charlie.address);
 
-    it("should add member to existing group", async function () {
-      const members = [signers.alice.address, signers.bob.address];
-      await fheSplitContract.connect(signers.bot).createGroup("Roommates", members);
-
-      await fheSplitContract.connect(signers.bot).addMember(1, signers.charlie.address);
-
-      // Query as bot (has access)
-      const groupMembers = await fheSplitContract.connect(signers.bot).getGroupMembers(1);
+      // Query as member (has access)
+      const groupMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(1);
       expect(groupMembers.length).to.equal(3);
       expect(groupMembers).to.include(signers.charlie.address);
     });
 
-    it("should remove member from group", async function () {
+    it("should fail to add member if not creator", async function () {
+      const members = [signers.alice.address, signers.bob.address];
+      await fheSplitContract.connect(signers.alice).createGroup("Roommates", members);
+
+      await expect(
+        fheSplitContract.connect(signers.bob).addMember(1, signers.charlie.address)
+      ).to.be.revertedWith("Only group creator can call this");
+    });
+
+    it("should remove member from group (only creator)", async function () {
       const members = [signers.alice.address, signers.bob.address, signers.charlie.address];
-      await fheSplitContract.connect(signers.bot).createGroup("Roommates", members);
+      await fheSplitContract.connect(signers.alice).createGroup("Roommates", members);
 
-      await fheSplitContract.connect(signers.bot).removeMember(1, signers.charlie.address);
+      await fheSplitContract.connect(signers.alice).removeMember(1, signers.charlie.address);
 
-      // Query as bot (has access)
-      const groupMembers = await fheSplitContract.connect(signers.bot).getGroupMembers(1);
+      // Query as member (has access)
+      const groupMembers = await fheSplitContract.connect(signers.alice).getGroupMembers(1);
       expect(groupMembers.length).to.equal(2);
       expect(groupMembers).to.not.include(signers.charlie.address);
 
@@ -224,10 +219,10 @@ describe("FHESplit", function () {
 
     it("should track user groups correctly", async function () {
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .createGroup("Group1", [signers.alice.address, signers.bob.address]);
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.bob)
         .createGroup("Group2", [signers.alice.address, signers.charlie.address]);
 
       const aliceGroups = await fheSplitContract.getUserGroups(signers.alice.address);
@@ -245,9 +240,9 @@ describe("FHESplit", function () {
     let groupId: bigint;
 
     beforeEach(async function () {
-      // Create a group
+      // Create a group (alice is creator)
       const members = [signers.alice.address, signers.bob.address, signers.charlie.address];
-      const tx = await fheSplitContract.connect(signers.bot).createGroup("Roommates", members);
+      const tx = await fheSplitContract.connect(signers.alice).createGroup("Roommates", members);
       await tx.wait();
       groupId = 1n;
     });
@@ -261,7 +256,7 @@ describe("FHESplit", function () {
       const proofs = [];
       for (const share of shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -269,7 +264,7 @@ describe("FHESplit", function () {
       }
 
       const tx = await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .addExpense(groupId, signers.alice.address, members, encryptedShares, proofs, "Pizza night");
       await tx.wait();
 
@@ -290,7 +285,7 @@ describe("FHESplit", function () {
       const proofs = [];
       for (const share of shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -298,11 +293,11 @@ describe("FHESplit", function () {
       }
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .addExpense(groupId, signers.alice.address, members, encryptedShares, proofs, "Dinner");
 
       // Bob should owe Alice 100
-      const encryptedOwed = await fheSplitContract.getNetOwedInGroup(
+      const encryptedOwed = await fheSplitContract.connect(signers.bob).getNetOwedInGroup(
         groupId,
         signers.bob.address,
         signers.alice.address
@@ -316,7 +311,7 @@ describe("FHESplit", function () {
       expect(clearOwed).to.equal(100000000n);
 
       // Charlie should owe Alice 100
-      const encryptedOwed2 = await fheSplitContract.getNetOwedInGroup(
+      const encryptedOwed2 = await fheSplitContract.connect(signers.charlie).getNetOwedInGroup(
         groupId,
         signers.charlie.address,
         signers.alice.address
@@ -330,7 +325,7 @@ describe("FHESplit", function () {
       expect(clearOwed2).to.equal(100000000n);
 
       // Alice should not owe herself
-      const encryptedOwed3 = await fheSplitContract.getNetOwedInGroup(
+      const encryptedOwed3 = await fheSplitContract.connect(signers.alice).getNetOwedInGroup(
         groupId,
         signers.alice.address,
         signers.alice.address
@@ -346,7 +341,7 @@ describe("FHESplit", function () {
       const proofs = [];
       for (const share of shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -354,7 +349,7 @@ describe("FHESplit", function () {
       }
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .addExpense(groupId, signers.alice.address, members, encryptedShares, proofs, "Dinner");
 
       // Bob queries his own creditors
@@ -379,7 +374,7 @@ describe("FHESplit", function () {
       const proofs = [];
       for (const share of shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -387,7 +382,7 @@ describe("FHESplit", function () {
       }
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .addExpense(groupId, signers.alice.address, members, encryptedShares, proofs, "Groceries");
 
       const bobShare = await fheSplitContract.getExpenseShare(1, signers.bob.address);
@@ -407,7 +402,7 @@ describe("FHESplit", function () {
     beforeEach(async function () {
       // Create group
       const members = [signers.alice.address, signers.bob.address, signers.charlie.address];
-      await fheSplitContract.connect(signers.bot).createGroup("Roommates", members);
+      await fheSplitContract.connect(signers.alice).createGroup("Roommates", members);
       groupId = 1n;
 
       // Add expense: Alice paid, Bob and Charlie owe 100 each
@@ -418,7 +413,7 @@ describe("FHESplit", function () {
       const proofs = [];
       for (const share of shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -426,7 +421,7 @@ describe("FHESplit", function () {
       }
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .addExpense(groupId, signers.alice.address, expenseMembers, encryptedShares, proofs, "Dinner");
     });
 
@@ -450,7 +445,7 @@ describe("FHESplit", function () {
         );
 
       // Bob should now owe Alice 50
-      const encryptedOwed = await fheSplitContract.getNetOwedInGroup(
+      const encryptedOwed = await fheSplitContract.connect(signers.bob).getNetOwedInGroup(
         groupId,
         signers.bob.address,
         signers.alice.address
@@ -464,7 +459,7 @@ describe("FHESplit", function () {
       expect(clearOwed).to.equal(50000000n);
 
       // Platform balances shouldn't change (all went to settling debt)
-      const bobBalance = await fheSplitContract.getPlatformBalance(signers.bob.address);
+      const bobBalance = await fheSplitContract.connect(signers.bob).getPlatformBalance(signers.bob.address);
       const clearBobBalance = await fhevm.userDecryptEuint(
         FhevmType.euint64,
         bobBalance,
@@ -473,7 +468,7 @@ describe("FHESplit", function () {
       );
       expect(clearBobBalance).to.equal(200000000n); // Still 200
 
-      const aliceBalance = await fheSplitContract.getPlatformBalance(signers.alice.address);
+      const aliceBalance = await fheSplitContract.connect(signers.alice).getPlatformBalance(signers.alice.address);
       const clearAliceBalance = await fhevm.userDecryptEuint(
         FhevmType.euint64,
         aliceBalance,
@@ -504,7 +499,7 @@ describe("FHESplit", function () {
         );
 
       // Bob should owe Alice 0
-      const encryptedOwed = await fheSplitContract.getNetOwedInGroup(
+      const encryptedOwed = await fheSplitContract.connect(signers.bob).getNetOwedInGroup(
         groupId,
         signers.bob.address,
         signers.alice.address
@@ -518,7 +513,7 @@ describe("FHESplit", function () {
       expect(clearOwed).to.equal(0n);
 
       // Bob's balance should decrease by 50 (the remainder after settling)
-      const bobBalance = await fheSplitContract.getPlatformBalance(signers.bob.address);
+      const bobBalance = await fheSplitContract.connect(signers.bob).getPlatformBalance(signers.bob.address);
       const clearBobBalance = await fhevm.userDecryptEuint(
         FhevmType.euint64,
         bobBalance,
@@ -528,7 +523,7 @@ describe("FHESplit", function () {
       expect(clearBobBalance).to.equal(150000000n); // 200 - 50
 
       // Alice's balance should increase by 50
-      const aliceBalance = await fheSplitContract.getPlatformBalance(signers.alice.address);
+      const aliceBalance = await fheSplitContract.connect(signers.alice).getPlatformBalance(signers.alice.address);
       const clearAliceBalance = await fhevm.userDecryptEuint(
         FhevmType.euint64,
         aliceBalance,
@@ -562,16 +557,27 @@ describe("FHESplit", function () {
   });
 
   describe("Access Control", function () {
-    it("should update bot address", async function () {
-      const newBot = signers.alice.address;
-      await fheSplitContract.connect(signers.bot).updateBotAddress(newBot);
-      expect(await fheSplitContract.xmtpBotAddress()).to.equal(newBot);
+    it("should allow anyone to create groups", async function () {
+      const members = [signers.alice.address, signers.bob.address];
+      const tx = await fheSplitContract.connect(signers.bob).createGroup("Bob's Group", members);
+      await tx.wait();
+
+      const group = await fheSplitContract.getGroup(1);
+      expect(group.creator).to.equal(signers.bob.address);
     });
 
-    it("should fail to update bot address if not current bot", async function () {
+    it("should allow only creator to add/remove members", async function () {
+      const members = [signers.alice.address, signers.bob.address];
+      await fheSplitContract.connect(signers.alice).createGroup("Alice's Group", members);
+
+      // Alice (creator) can add member
+      await fheSplitContract.connect(signers.alice).addMember(1, signers.charlie.address);
+      expect(await fheSplitContract.isMemberOfGroup(1, signers.charlie.address)).to.be.true;
+
+      // Bob (not creator) cannot add member
       await expect(
-        fheSplitContract.connect(signers.alice).updateBotAddress(signers.bob.address)
-      ).to.be.revertedWith("Only XMTP bot can call this");
+        fheSplitContract.connect(signers.bob).addMember(1, signers.deployer.address)
+      ).to.be.revertedWith("Only group creator can call this");
     });
   });
 
@@ -581,7 +587,7 @@ describe("FHESplit", function () {
     beforeEach(async function () {
       // Create a group with Alice and Bob
       const members = [signers.alice.address, signers.bob.address];
-      await fheSplitContract.connect(signers.bot).createGroup("TestGroup", members);
+      await fheSplitContract.connect(signers.alice).createGroup("TestGroup", members);
       groupId = 1n;
 
       // Add expense so there are debt relationships
@@ -592,7 +598,7 @@ describe("FHESplit", function () {
       const proofs = [];
       for (const share of shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -600,7 +606,7 @@ describe("FHESplit", function () {
       }
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .addExpense(groupId, signers.alice.address, expenseMembers, encryptedShares, proofs, "Test");
     });
 
@@ -615,10 +621,6 @@ describe("FHESplit", function () {
       ).to.be.revertedWith("Only group members can view members");
     });
 
-    it("should allow bot to query group members", async function () {
-      const members = await fheSplitContract.connect(signers.bot).getGroupMembers(groupId);
-      expect(members.length).to.equal(2);
-    });
 
     it("should allow user to query their own creditors", async function () {
       const creditors = await fheSplitContract
@@ -652,10 +654,6 @@ describe("FHESplit", function () {
       expect(balance).to.not.equal(ethers.ZeroHash);
     });
 
-    it("should allow bot to query any balance", async function () {
-      const balance = await fheSplitContract.connect(signers.bot).getPlatformBalance(signers.alice.address);
-      expect(balance).to.not.equal(ethers.ZeroHash);
-    });
 
     it("should allow debt-related parties to query balance", async function () {
       // Bob has debt relationship with Alice, so he can query her balance
@@ -670,7 +668,7 @@ describe("FHESplit", function () {
       ).to.be.revertedWith("Not authorized to view balance");
     });
 
-    it("should allow only debtor, creditor, or bot to query specific debt", async function () {
+    it("should allow only debtor or creditor to query specific debt", async function () {
       // Bob can query his debt to Alice
       const debt1 = await fheSplitContract
         .connect(signers.bob)
@@ -682,12 +680,6 @@ describe("FHESplit", function () {
         .connect(signers.alice)
         .getNetOwedInGroup(groupId, signers.bob.address, signers.alice.address);
       expect(debt2).to.not.equal(ethers.ZeroHash);
-
-      // Bot can query any debt
-      const debt3 = await fheSplitContract
-        .connect(signers.bot)
-        .getNetOwedInGroup(groupId, signers.bob.address, signers.alice.address);
-      expect(debt3).to.not.equal(ethers.ZeroHash);
     });
 
     it("should prevent unauthorized users from querying specific debt", async function () {
@@ -719,12 +711,12 @@ describe("FHESplit", function () {
     beforeEach(async function () {
       // Create two groups
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .createGroup("Group1", [signers.alice.address, signers.bob.address]);
       group1Id = 1n;
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.bob)
         .createGroup("Group2", [signers.alice.address, signers.charlie.address]);
       group2Id = 2n;
 
@@ -736,7 +728,7 @@ describe("FHESplit", function () {
       let proofs = [];
       for (const share of expense1Shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.alice.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -744,7 +736,7 @@ describe("FHESplit", function () {
       }
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.alice)
         .addExpense(group1Id, signers.alice.address, expense1Members, encryptedShares, proofs, "Group1 expense");
 
       // Add expense in group 2: Charlie paid, Alice owes 50
@@ -755,7 +747,7 @@ describe("FHESplit", function () {
       proofs = [];
       for (const share of expense2Shares) {
         const encrypted = await fhevm
-          .createEncryptedInput(fheSplitAddress, signers.bot.address)
+          .createEncryptedInput(fheSplitAddress, signers.charlie.address)
           .add64(share)
           .encrypt();
         encryptedShares.push(encrypted.handles[0]);
@@ -763,7 +755,7 @@ describe("FHESplit", function () {
       }
 
       await fheSplitContract
-        .connect(signers.bot)
+        .connect(signers.charlie)
         .addExpense(group2Id, signers.charlie.address, expense2Members, encryptedShares, proofs, "Group2 expense");
     });
 
@@ -812,12 +804,6 @@ describe("FHESplit", function () {
       ).to.be.revertedWith("Not authorized");
     });
 
-    it("should allow bot to query cross-group debts", async function () {
-      const [groupIds, creditors] = await fheSplitContract
-        .connect(signers.bot)
-        .getAllMyCreditors(signers.alice.address);
-      expect(groupIds.length).to.be.greaterThanOrEqual(0);
-    });
 
     it("should return empty arrays when user has no creditors", async function () {
       // Charlie has no creditors (nobody owes him money yet)

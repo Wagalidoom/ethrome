@@ -1,11 +1,11 @@
 {
   "network": "sepolia",
   "chainId": 11155111,
-  "timestamp": "2025-10-17T23:04:51.624Z",
+  "timestamp": "2025-10-18T15:38:57.063Z",
   "contracts": {
     "MockERC20": "0x522D9F63b1ab865099152481D2c72432bC78c677",
     "cToken": "0x80A75e0B15A943E91945eda2558A02Afa30CDb3F",
-    "FHESplit": "0xED1AF0c091ba2e57CAD012798a305146AC872a38"
+    "FHESplit": "0x35D15A363A5fdA62a2Fa27badA673Ec37F49FFa2"
   },
   "deployer": "0xd4de553ABD6D11d9707CcB6Cc8d520D55010DdCC"
 }

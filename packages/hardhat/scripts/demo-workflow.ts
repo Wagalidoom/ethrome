@@ -119,14 +119,14 @@ async function main() {
 
   // User mapping for display names
   const userNames = new Map<string, string>();
-  userNames.set(deployer.address.toLowerCase(), "Deployer/Bot");
+  userNames.set(deployer.address.toLowerCase(), "Deployer");
   userNames.set(alice.address.toLowerCase(), "Alice");
   userNames.set(bob.address.toLowerCase(), "Bob");
   userNames.set(charlie.address.toLowerCase(), "Charlie");
   userNames.set(david.address.toLowerCase(), "David");
 
   console.log("\n👥 Participants:");
-  console.log(`  • Deployer/Bot: ${deployer.address}`);
+  console.log(`  • Deployer:     ${deployer.address}`);
   console.log(`  • Alice:        ${alice.address}`);
   console.log(`  • Bob:          ${bob.address}`);
   console.log(`  • Charlie:      ${charlie.address}`);
@@ -200,19 +200,19 @@ async function main() {
   printSection(3, "Creating Multiple Groups", "👥");
   // ==========================================
 
-  printInfo("Creating Group 1: Roommates (Alice, Bob, Charlie)");
+  printInfo("Creating Group 1: Roommates (Alice, Bob, Charlie) - Creator: Alice");
   const group1Members = [alice.address, bob.address, charlie.address];
-  await fheSplit.connect(deployer).createGroup("Roommates", group1Members);
+  await fheSplit.connect(alice).createGroup("Roommates", group1Members);
   const group1Id = 1n;
   printSuccess(`Group "Roommates" created with ID ${group1Id}`);
-  printInfo(`Members: Alice, Bob, Charlie`, 2);
+  printInfo(`Creator: Alice, Members: Alice, Bob, Charlie`, 2);
 
-  printInfo("\nCreating Group 2: Weekend Trip (Alice, Bob)");
+  printInfo("\nCreating Group 2: Weekend Trip (Alice, Bob) - Creator: Bob");
   const group2Members = [alice.address, bob.address];
-  await fheSplit.connect(deployer).createGroup("Weekend Trip", group2Members);
+  await fheSplit.connect(bob).createGroup("Weekend Trip", group2Members);
   const group2Id = 2n;
   printSuccess(`Group "Weekend Trip" created with ID ${group2Id}`);
-  printInfo(`Members: Alice, Bob`, 2);
+  printInfo(`Creator: Bob, Members: Alice, Bob`, 2);
 
   // Query group info (as member)
   printInfo("\nQuerying group details...");
@@ -225,12 +225,12 @@ async function main() {
   // ==========================================
 
   printInfo("David wants to join 'Roommates' group");
-  printInfo("Only bot can add members (controlled via XMTP bot)", 2);
+  printInfo("Only group creator (Alice) can add members", 2);
 
-  await fheSplit.connect(deployer).addMember(group1Id, david.address);
-  printSuccess("David added to Roommates group");
+  await fheSplit.connect(alice).addMember(group1Id, david.address);
+  printSuccess("David added to Roommates group by Alice (creator)");
 
-  const updatedMembers = await fheSplit.connect(deployer).getGroupMembers(group1Id);
+  const updatedMembers = await fheSplit.connect(alice).getGroupMembers(group1Id);
   printInfo(`Roommates now has ${updatedMembers.length} members`, 2);
 
   // Query David's groups
@@ -252,7 +252,7 @@ async function main() {
   let proofs = [];
   for (const share of exp1Shares) {
     const encrypted = await fhevm
-      .createEncryptedInput(fheSplitDeployment.address, deployer.address)
+      .createEncryptedInput(fheSplitDeployment.address, alice.address)
       .add64(share)
       .encrypt();
     encryptedShares.push(encrypted.handles[0]);
@@ -260,7 +260,7 @@ async function main() {
   }
 
   await fheSplit
-    .connect(deployer)
+    .connect(alice)
     .addExpense(group1Id, alice.address, exp1Members, encryptedShares, proofs, "Pizza night 🍕");
   printSuccess("Added expense: Pizza night");
   printInfo("Alice paid 400, each owes Alice 100", 2);
@@ -276,7 +276,7 @@ async function main() {
   proofs = [];
   for (const share of exp2Shares) {
     const encrypted = await fhevm
-      .createEncryptedInput(fheSplitDeployment.address, deployer.address)
+      .createEncryptedInput(fheSplitDeployment.address, bob.address)
       .add64(share)
       .encrypt();
     encryptedShares.push(encrypted.handles[0]);
@@ -284,7 +284,7 @@ async function main() {
   }
 
   await fheSplit
-    .connect(deployer)
+    .connect(bob)
     .addExpense(group1Id, bob.address, exp2Members, encryptedShares, proofs, "Groceries 🛒");
   printSuccess("Added expense: Groceries");
   printInfo("Bob paid 240, each owes Bob 60", 2);
@@ -300,7 +300,7 @@ async function main() {
   proofs = [];
   for (const share of exp3Shares) {
     const encrypted = await fhevm
-      .createEncryptedInput(fheSplitDeployment.address, deployer.address)
+      .createEncryptedInput(fheSplitDeployment.address, alice.address)
       .add64(share)
       .encrypt();
     encryptedShares.push(encrypted.handles[0]);
@@ -308,7 +308,7 @@ async function main() {
   }
 
   await fheSplit
-    .connect(deployer)
+    .connect(alice)
     .addExpense(group2Id, alice.address, exp3Members, encryptedShares, proofs, "Hotel booking 🏨");
   printSuccess("Added expense: Hotel booking");
   printInfo("Alice paid 200, Bob owes Alice 100", 2);
@@ -538,9 +538,9 @@ async function main() {
 
   printSubsection("🚫 Blocked: Non-Members Cannot Query Members");
   try {
-    // David was added to group 1, so let's remove him first
-    await fheSplit.connect(deployer).removeMember(group1Id, david.address);
-    printInfo("David removed from Roommates group", 2);
+    // David was added to group 1, so let's remove him first (Alice is creator)
+    await fheSplit.connect(alice).removeMember(group1Id, david.address);
+    printInfo("David removed from Roommates group by Alice (creator)", 2);
 
     // Now David tries to query (should fail)
     await fheSplit.connect(david).getGroupMembers(group1Id);
@@ -598,13 +598,11 @@ async function main() {
     printInfo("Error: Not authorized", 2);
   }
 
-  printSubsection("✅ Allowed: Bot Can Access Everything");
+  printSubsection("✅ Allowed: Group Members Can See Other Members");
   try {
-    const members = await fheSplit.connect(deployer).getGroupMembers(group1Id);
-    const balance = await fheSplit.connect(deployer).getPlatformBalance(alice.address);
-    const debt = await fheSplit.connect(deployer).getNetOwedInGroup(group1Id, bob.address, alice.address);
-    printSuccess("Bot has full access to all data (for XMTP management)");
-    printInfo(`Can query: members (${members.length}), balances, debts`, 2);
+    const members = await fheSplit.connect(bob).getGroupMembers(group1Id);
+    printSuccess("Group members can see all other group members");
+    printInfo(`Bob can see ${members.length} members in the group`, 2);
   } catch (e) {
     printBlocked(`Failed: ${(e as Error).message}`);
   }
@@ -720,16 +718,16 @@ async function main() {
      • getPlatformBalance(user) - Query user's balance (returns encrypted)
 
   ✅ Group Management:
-     • createGroup(name, members) - Bot only
-     • addMember(groupId, member) - Bot only
-     • removeMember(groupId, member) - Bot only
+     • createGroup(name, members) - Any user can create
+     • addMember(groupId, member) - Creator only
+     • removeMember(groupId, member) - Creator only
      • getGroupMembers(groupId) - Members only
      • getUserGroups(user) - Get user's groups
      • getGroup(groupId) - Get group details
      • isMemberOfGroup(groupId, member) - Check membership
 
   ✅ Expense Management:
-     • addExpense(groupId, payer, members, encryptedShares, proofs, description) - Bot only
+     • addExpense(groupId, payer, members, encryptedShares, proofs, description) - Group members only
      • getGroupExpenses(groupId) - Get all expense IDs
      • getExpense(expenseId) - Get expense details
      • getExpenseShare(expenseId, member) - Get member's share (encrypted)
@@ -756,7 +754,8 @@ async function main() {
      • Cache decrypted values client-side (decryption is expensive)
      • Use cross-group queries for dashboard views
      • Handle access control errors gracefully (show appropriate UI)
-     • Bot handles all group/expense modifications (via XMTP)
+     • Group creators manage membership (add/remove members)
+     • Any group member can add expenses
   `);
 
   // ==========================================
