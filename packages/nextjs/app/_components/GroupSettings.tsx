@@ -22,7 +22,7 @@ export const GroupSettings = () => {
 
   const initialMockChains = { 31337: "http://localhost:8545" };
 
-  const { instance: fhevmInstance, status: fhevmStatus } = useFhevm({
+  const { instance: fhevmInstance } = useFhevm({
     provider,
     chainId,
     initialMockChains,
@@ -205,8 +205,14 @@ export const GroupSettings = () => {
   };
 
   const handleAddExpense = async () => {
-    const memberAddresses = addresses.split(",").map(a => a.trim()).filter(Boolean);
-    const memberShares = shares.split(",").map(s => BigInt(Math.floor(parseFloat(s.trim()) * 1e18))).filter(Boolean);
+    const memberAddresses = addresses
+      .split(",")
+      .map(a => a.trim())
+      .filter(Boolean);
+    const memberShares = shares
+      .split(",")
+      .map(s => BigInt(Math.floor(parseFloat(s.trim()) * 1e18)))
+      .filter(Boolean);
 
     const success = await fheSplit.addExpense({
       payer: expensePayer,
@@ -227,9 +233,9 @@ export const GroupSettings = () => {
     <div className="min-h-screen bg-base-300 text-white">
       {/* Content */}
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        <GroupHeader 
-          name={fheSplit.groupInfo?.name ?? "Group"} 
-          createdDate={new Date(Number(fheSplit.groupInfo?.createdAt) * 1000).toLocaleDateString()} 
+        <GroupHeader
+          name={fheSplit.groupInfo?.name ?? "Group"}
+          createdDate={new Date(Number(fheSplit.groupInfo?.createdAt) * 1000).toLocaleDateString()}
         />
 
         {/* Status Messages */}
