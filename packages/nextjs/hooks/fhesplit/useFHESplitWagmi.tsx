@@ -165,6 +165,94 @@ export const useFHESplitWagmi = (parameters: {
     [instance, hasSigner, isProcessing, groupId],
   );
 
+  // Add expense function
+  const addExpense = useCallback(
+    async (params: {
+      payer: string;
+      members: string[];
+      shares: bigint[];
+      description: string;
+    }) => {
+      const { payer, members, shares, description } = params;
+
+      if (isProcessing || !hasSigner || !instance || groupId === undefined) {
+        setMessage("Cannot add expense: missing requirements");
+        return false;
+      }
+
+      setIsProcessing(true);
+      setMessage("Encrypting shares...");
+
+      try {
+        if (!ethers.isAddress(payer)) {
+          setMessage("Invalid payer address");
+          return false;
+        }
+
+        for (const member of members) {
+          if (!ethers.isAddress(member)) {
+            setMessage(`Invalid member address: ${member}`);
+            return false;
+          }
+        }
+
+        const userAddress = await ethersSigner?.getAddress();
+        if (!userAddress) {
+          setMessage("Unable to get user address");
+          return false;
+        }
+
+        // Encrypt each share
+        const encryptedShares: string[] = [];
+        const proofs: string[] = [];
+
+        for (let i = 0; i < shares.length; i++) {
+          const share = shares[i];
+          const encrypted = await instance
+            .createEncryptedInput(FHESplitAddress, userAddress)
+            .add64(share)
+            .encrypt();
+
+          const handleHex = "0x" + Buffer.from(encrypted.handles[0]).toString("hex");
+          const proofHex = "0x" + Buffer.from(encrypted.inputProof).toString("hex");
+
+          encryptedShares.push(handleHex);
+          proofs.push(proofHex);
+        }
+
+        setMessage("Submitting transaction...");
+
+        const writeContract = getContract("write");
+        if (!writeContract) {
+          setMessage("Contract not available");
+          return false;
+        }
+
+        const tx = await writeContract.addExpense(
+          BigInt(groupId),
+          payer,
+          members,
+          encryptedShares,
+          proofs,
+          description,
+        );
+
+        setMessage("Waiting for transaction confirmation...");
+        const receipt = await tx.wait();
+
+        setMessage(`Successfully added expense: ${description}`);
+        return true;
+      } catch (e) {
+        const error = e as Error;
+        setMessage(`Failed to add expense: ${error.message}`);
+        return false;
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [isProcessing, hasSigner, instance, groupId, ethersSigner, getContract],
+  );
+
   return {
     contractAddress: FHESplitAddress,
     groupMembers,
@@ -173,6 +261,7 @@ export const useFHESplitWagmi = (parameters: {
     canManageMembers,
     addMember,
     removeMember,
+    addExpense,
     refreshMembers,
     message,
     isProcessing,

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ExpensesHistory } from "./ExpensesHistory";
 import { GroupHeader } from "./GroupHeader";
 import { GroupMembersList } from "./GroupMembersList";
+import ModalButton from "./ModalButton";
 import type { ExpenseWithShares, GroupMember } from "./types";
 import { useFhevm } from "@fhevm-sdk";
 import { useAccount } from "wagmi";
@@ -42,7 +43,11 @@ export const GroupSettings = () => {
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [newMemberAddress, setNewMemberAddress] = useState("");
 
-  console.log(fheSplit.groupMembers, fheSplit.groupInfo, fhevmStatus);
+  // Add expense state
+  const [expenseDescription, setExpenseDescription] = useState("");
+  const [expensePayer, setExpensePayer] = useState("");
+  const [addresses, setAddresses] = useState("");
+  const [shares, setShares] = useState("");
 
   // Mock members for UI - in production, fetch from contract
   const [members, setMembers] = useState<GroupMember[]>([
@@ -199,6 +204,25 @@ export const GroupSettings = () => {
     // Implement invite via link logic
   };
 
+  const handleAddExpense = async () => {
+    const memberAddresses = addresses.split(",").map(a => a.trim()).filter(Boolean);
+    const memberShares = shares.split(",").map(s => BigInt(Math.floor(parseFloat(s.trim()) * 1e18))).filter(Boolean);
+
+    const success = await fheSplit.addExpense({
+      payer: expensePayer,
+      members: memberAddresses,
+      shares: memberShares,
+      description: expenseDescription,
+    });
+
+    if (success) {
+      setExpenseDescription("");
+      setExpensePayer("");
+      setAddresses("");
+      setShares("");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-base-300 text-white">
       {/* Content */}
@@ -221,6 +245,43 @@ export const GroupSettings = () => {
             <p className="text-yellow-400">⚠️ Wallet not connected. Connect to manage members.</p>
           </div>
         )}
+
+        <ModalButton title="Add Expense">
+          <h3 className="text-xl font-bold mb-4">Add Expense</h3>
+          <div className="space-y-4">
+            <input
+              type="text"
+              placeholder="Description"
+              value={expenseDescription}
+              onChange={e => setExpenseDescription(e.target.value)}
+              className="w-full px-4 py-2 bg-base-300 rounded-lg"
+            />
+            <input
+              type="text"
+              placeholder="Payer address"
+              value={expensePayer}
+              onChange={e => setExpensePayer(e.target.value)}
+              className="w-full px-4 py-2 bg-base-300 rounded-lg"
+            />
+            <input
+              type="text"
+              placeholder="Addresses (comma-separated)"
+              value={addresses}
+              onChange={e => setAddresses(e.target.value)}
+              className="w-full px-4 py-2 bg-base-300 rounded-lg"
+            />
+            <input
+              type="text"
+              placeholder="Shares in ETH (comma-separated)"
+              value={shares}
+              onChange={e => setShares(e.target.value)}
+              className="w-full px-4 py-2 bg-base-300 rounded-lg"
+            />
+            <button onClick={handleAddExpense} className="w-full btn btn-primary">
+              Add Expense
+            </button>
+          </div>
+        </ModalButton>
 
         <ExpensesHistory expenses={expenses} />
 
