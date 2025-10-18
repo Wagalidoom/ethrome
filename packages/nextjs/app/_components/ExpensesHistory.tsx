@@ -7,12 +7,11 @@ interface ExpensesHistoryProps {
 
 export const ExpensesHistory = ({ expenses }: ExpensesHistoryProps) => {
     const formatDate = (timestamp: number) => {
-        const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
+        const date = new Date(timestamp * 1000);
         return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     };
 
     const formatAmount = (amount: bigint | number) => {
-        // Convert from wei/smallest unit to display unit (assuming 18 decimals)
         const amountInEther = typeof amount === 'bigint' ? Number(amount) / 1e18 : amount;
         return new Intl.NumberFormat("en-US", {
             style: "currency",
