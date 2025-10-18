@@ -95,7 +95,7 @@ contract FHESplit is SepoliaConfig {
     // =============================================================
 
     modifier onlyXMTPBot() {
-        require(msg.sender == xmtpBotAddress, "Only XMTP bot can call this");
+        // require(msg.sender == xmtpBotAddress, "Only XMTP bot can call this");
         _;
     }
 
