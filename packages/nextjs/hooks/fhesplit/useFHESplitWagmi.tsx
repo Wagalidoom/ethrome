@@ -176,7 +176,7 @@ export const useFHESplitWagmi = (parameters: {
       const { payer, members, shares, description } = params;
 
       if (isProcessing || !hasSigner || !instance || groupId === undefined) {
-        setMessage("Cannot add expense: missing requirements");
+        setMessage("Cannot add expense: missing requirements" + isProcessing + hasSigner + instance + groupId);
         return false;
       }
 
