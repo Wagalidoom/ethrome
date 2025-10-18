@@ -402,21 +402,22 @@ contract FHESplit is SepoliaConfig {
             euint64 share = FHE.fromExternal(encryptedShares[i], sharesProof[i]);
             expenseShares[expenseId][member] = share;
 
-            // Set ACL for expense share
-            FHE.allowThis(share);
-            FHE.allow(share, member);
-            FHE.allow(share, payer);
+            // Set ACL for expense share - CRITICAL FOR DECRYPTION
+            FHE.allowThis(share);  // Allow contract to access
+            FHE.allow(share, member);  // Allow member to decrypt their share
+            FHE.allow(share, payer);  // Allow payer to see all shares
 
             // Update net owed if member is not the payer
             if (member != payer) {
                 // Member owes payer this share amount
                 euint64 currentDebt = groupNetOwed[groupId][member][payer];
-                groupNetOwed[groupId][member][payer] = FHE.add(currentDebt, share);
+                euint64 newDebt = FHE.add(currentDebt, share);
+                groupNetOwed[groupId][member][payer] = newDebt;
 
-                // Set ACL permissions: Only debtor and creditor can see this debt
-                FHE.allowThis(groupNetOwed[groupId][member][payer]);
-                FHE.allow(groupNetOwed[groupId][member][payer], member);
-                FHE.allow(groupNetOwed[groupId][member][payer], payer);
+                // Set ACL permissions for debt - CRITICAL FOR DECRYPTION
+                FHE.allowThis(newDebt);  // Allow contract to access
+                FHE.allow(newDebt, member);  // Allow debtor to decrypt
+                FHE.allow(newDebt, payer);  // Allow creditor to decrypt
 
                 // Track debt relationship
                 if (!hasDebtRelationship[groupId][member][payer]) {
@@ -795,5 +796,87 @@ contract FHESplit is SepoliaConfig {
             _i /= 10;
         }
         return string(bstr);
+    }
+
+    // =============================================================
+    //                      ACL FIX FUNCTIONS
+    // =============================================================
+
+    /// @notice Fix ACL permissions for an existing expense
+    /// @dev This function re-grants ACL permissions for expense shares and debts
+    ///      Use this if members cannot decrypt their shares due to ACL issues
+    /// @param expenseId The expense ID to fix ACL permissions for
+    /// @param members The members who were part of this expense
+    function fixExpenseACL(uint256 expenseId, address[] memory members) external {
+        require(expenses[expenseId].exists, "Expense does not exist");
+
+        Expense memory expense = expenses[expenseId];
+        uint256 groupId = expense.groupId;
+        address payer = expense.payer;
+
+        // Only group members or payer can fix ACL
+        require(
+            isGroupMember[groupId][msg.sender] || msg.sender == payer,
+            "Only group members can fix ACL"
+        );
+
+        // Re-grant ACL permissions for each member's share
+        for (uint256 i = 0; i < members.length; i++) {
+            address member = members[i];
+            euint64 share = expenseShares[expenseId][member];
+
+            // Re-grant ACL for expense share
+            FHE.allowThis(share);
+            FHE.allow(share, member);
+            FHE.allow(share, payer);
+
+            // Re-grant ACL for debt if member is not the payer
+            if (member != payer) {
+                euint64 debt = groupNetOwed[groupId][member][payer];
+                FHE.allowThis(debt);
+                FHE.allow(debt, member);
+                FHE.allow(debt, payer);
+            }
+        }
+    }
+
+    /// @notice Fix ACL permissions for all expenses in a group
+    /// @dev Batch version of fixExpenseACL for all expenses in a group
+    /// @param groupId The group ID
+    /// @param expenseIds The expense IDs to fix
+    /// @param membersPerExpense Array of member arrays for each expense
+    function fixGroupExpensesACL(
+        uint256 groupId,
+        uint256[] memory expenseIds,
+        address[][] memory membersPerExpense
+    ) external onlyGroupMember(groupId) {
+        require(expenseIds.length == membersPerExpense.length, "Array length mismatch");
+
+        for (uint256 i = 0; i < expenseIds.length; i++) {
+            uint256 expenseId = expenseIds[i];
+            address[] memory members = membersPerExpense[i];
+
+            require(expenses[expenseId].exists, "Expense does not exist");
+            require(expenses[expenseId].groupId == groupId, "Expense not in group");
+
+            address payer = expenses[expenseId].payer;
+
+            // Re-grant ACL permissions for each member's share
+            for (uint256 j = 0; j < members.length; j++) {
+                address member = members[j];
+                euint64 share = expenseShares[expenseId][member];
+
+                FHE.allowThis(share);
+                FHE.allow(share, member);
+                FHE.allow(share, payer);
+
+                if (member != payer) {
+                    euint64 debt = groupNetOwed[groupId][member][payer];
+                    FHE.allowThis(debt);
+                    FHE.allow(debt, member);
+                    FHE.allow(debt, payer);
+                }
+            }
+        }
     }
 }
