@@ -21,7 +21,7 @@ export const GroupSettings = () => {
 
   const initialMockChains = { 31337: "http://localhost:8545" };
 
-  const { instance: fhevmInstance } = useFhevm({
+  const { instance: fhevmInstance, status: fhevmStatus } = useFhevm({
     provider,
     chainId,
     initialMockChains,
@@ -42,7 +42,7 @@ export const GroupSettings = () => {
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [newMemberAddress, setNewMemberAddress] = useState("");
 
-  console.log(fheSplit.groupMembers);
+  console.log(fheSplit.groupMembers, fheSplit.groupInfo, fhevmStatus);
 
   // Mock members for UI - in production, fetch from contract
   const [members, setMembers] = useState<GroupMember[]>([
@@ -203,7 +203,10 @@ export const GroupSettings = () => {
     <div className="min-h-screen bg-base-300 text-white">
       {/* Content */}
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        <GroupHeader name="Weekend Trip" createdDate="Oct 15, 2024" />
+        <GroupHeader 
+          name={fheSplit.groupInfo?.name ?? "Group"} 
+          createdDate={new Date(Number(fheSplit.groupInfo?.createdAt) * 1000).toLocaleDateString()} 
+        />
 
         {/* Status Messages */}
         {fheSplit.message && (

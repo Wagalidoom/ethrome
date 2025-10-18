@@ -66,8 +66,6 @@ export const useFHESplitWagmi = (parameters: {
     },
   });
 
-  console.log(readGroupResult);
-
   const groupInfo = useMemo(() => readGroupResult.data, [readGroupResult.data]);
 
   // Add member function
