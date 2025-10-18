@@ -27,6 +27,7 @@
     "burner-connector": "0.0.18",
     "daisyui": "5.0.9",
     "ethers": "^6.13.4",
+    "frames.js": "^0.22.0",
     "idb": "^8.0.3",
     "kubo-rpc-client": "~5.0.2",
     "next": "~15.2.3",
