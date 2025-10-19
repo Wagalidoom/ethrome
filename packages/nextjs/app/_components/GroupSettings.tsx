@@ -209,10 +209,28 @@ export const GroupSettings = () => {
       .split(",")
       .map(a => a.trim())
       .filter(Boolean);
-    const memberShares = shares
+    
+    const shareValues = shares
       .split(",")
-      .map(s => BigInt(Math.floor(parseFloat(s.trim()) * 1e18)))
+      .map(s => s.trim())
       .filter(Boolean);
+
+    if (memberAddresses.length !== shareValues.length) {
+      alert(`Number of addresses (${memberAddresses.length}) must match number of shares (${shareValues.length})`);
+      return;
+    }
+
+    const memberShares = shareValues.map(s => {
+      const value = parseFloat(s);
+      if (isNaN(value)) {
+        throw new Error(`Invalid share value: ${s}`);
+      }
+      return BigInt(Math.floor(value * 1e18));
+    });
+
+    console.log("Addresses:", memberAddresses);
+    console.log("Shares (ETH):", shareValues);
+    console.log("Shares (wei):", memberShares);
 
     const success = await fheSplit.addExpense({
       payer: expensePayer,

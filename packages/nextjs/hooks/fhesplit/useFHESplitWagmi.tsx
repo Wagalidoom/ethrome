@@ -176,7 +176,14 @@ export const useFHESplitWagmi = (parameters: {
       const { payer, members, shares, description } = params;
 
       if (isProcessing || !hasSigner || !instance || groupId === undefined) {
-        setMessage("Cannot add expense: missing requirements" + isProcessing + hasSigner + instance + groupId);
+        setMessage(
+          `Cannot add expense: isProcessing=${isProcessing}, hasSigner=${hasSigner}, hasInstance=${!!instance}, groupId=${groupId}`,
+        );
+        return false;
+      }
+
+      if (members.length !== shares.length) {
+        setMessage(`Members count (${members.length}) must match shares count (${shares.length})`);
         return false;
       }
 
@@ -186,12 +193,14 @@ export const useFHESplitWagmi = (parameters: {
       try {
         if (!ethers.isAddress(payer)) {
           setMessage("Invalid payer address");
+          setIsProcessing(false);
           return false;
         }
 
         for (const member of members) {
           if (!ethers.isAddress(member)) {
             setMessage(`Invalid member address: ${member}`);
+            setIsProcessing(false);
             return false;
           }
         }
@@ -206,8 +215,11 @@ export const useFHESplitWagmi = (parameters: {
         const encryptedShares: string[] = [];
         const proofs: string[] = [];
 
+        console.log("Starting encryption for", shares.length, "shares");
         for (let i = 0; i < shares.length; i++) {
           const share = shares[i];
+          console.log(`Encrypting share ${i + 1}/${shares.length}: ${share}`);
+          
           const encrypted = await instance
             .createEncryptedInput(FHESplitAddress, userAddress)
             .add64(share)
@@ -218,8 +230,11 @@ export const useFHESplitWagmi = (parameters: {
 
           encryptedShares.push(handleHex);
           proofs.push(proofHex);
+          console.log(`Encrypted share ${i + 1}: handle length=${handleHex.length}, proof length=${proofHex.length}`);
         }
 
+        console.log("All shares encrypted. Encrypted shares:", encryptedShares.length);
+        console.log("Proofs:", proofs.length);
         setMessage("Submitting transaction...");
 
         const writeContract = getContract("write");
@@ -227,6 +242,15 @@ export const useFHESplitWagmi = (parameters: {
           setMessage("Contract not available");
           return false;
         }
+
+        console.log("Calling addExpense with:", {
+          groupId: BigInt(groupId),
+          payer,
+          members,
+          encryptedSharesCount: encryptedShares.length,
+          proofsCount: proofs.length,
+          description,
+        });
 
         const tx = await writeContract.addExpense(
           BigInt(groupId),
@@ -237,13 +261,16 @@ export const useFHESplitWagmi = (parameters: {
           description,
         );
 
+        console.log("Transaction sent:", tx.hash);
         setMessage("Waiting for transaction confirmation...");
         const receipt = await tx.wait();
+        console.log("Transaction confirmed:", receipt);
 
         setMessage(`Successfully added expense: ${description}`);
         return true;
       } catch (e) {
         const error = e as Error;
+        console.error("Error adding expense:", error);
         setMessage(`Failed to add expense: ${error.message}`);
         return false;
       } finally {
