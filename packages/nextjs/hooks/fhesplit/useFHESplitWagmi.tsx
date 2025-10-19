@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWagmiEthers } from "../wagmi/useWagmiEthers";
 import { FhevmInstance } from "@fhevm-sdk";
+import { useFHEDecrypt, useInMemoryStorage } from "@fhevm-sdk";
 import { ethers } from "ethers";
 import { useReadContract } from "wagmi";
 import FHESplit_ABI from "~~/utils/abi/FHESplit";
@@ -15,6 +16,7 @@ export const useFHESplitWagmi = (parameters: {
   groupId: number;
 }) => {
   const { instance, initialMockChains, groupId } = parameters;
+  const { storage: fhevmDecryptionSignatureStorage } = useInMemoryStorage();
 
   // Wagmi + ethers interop
   const { chainId, accounts, isConnected, ethersReadonlyProvider, ethersSigner } = useWagmiEthers(initialMockChains);
@@ -23,6 +25,7 @@ export const useFHESplitWagmi = (parameters: {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [isLoadingExpenses, setIsLoadingExpenses] = useState<boolean>(false);
+  const [debtHandles, setDebtHandles] = useState<Record<string, string>>({});
 
   // Helpers
   const hasProvider = Boolean(ethersReadonlyProvider);
@@ -124,6 +127,8 @@ export const useFHESplitWagmi = (parameters: {
     },
   });
 
+
+
   const groupInfo = useMemo(() => readGroupResult.data, [readGroupResult.data]);
 
   // Add member function
@@ -223,6 +228,164 @@ export const useFHESplitWagmi = (parameters: {
     [instance, hasSigner, isProcessing, groupId],
   );
 
+  // Fetch debt handles for all group members
+  const userAddress = accounts?.[0];
+  
+  useEffect(() => {
+    const fetchDebtHandles = async () => {
+      if (!hasProvider || !userAddress || groupMembers.length === 0) {
+        if (Object.keys(debtHandles).length > 0) {
+          setDebtHandles({});
+        }
+        return;
+      }
+
+      const readContract = getContract("read");
+      if (!readContract) return;
+
+      const handles: Record<string, string> = {};
+
+      try {
+        // Query debt from user to each other group member
+        for (const member of groupMembers) {
+          if (member.toLowerCase() === userAddress.toLowerCase()) continue;
+
+          const handle = await readContract.getNetOwedInGroup(BigInt(groupId), userAddress, member);
+          if (handle && handle !== ethers.ZeroHash) {
+            handles[member] = handle;
+          }
+        }
+        setDebtHandles(handles);
+      } catch (error) {
+        console.error("Error fetching debt handles:", error);
+      }
+    };
+
+    fetchDebtHandles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasProvider, userAddress, groupMembers.length, groupId]);
+
+  // Prepare decrypt requests for all debt handles
+  const decryptRequests = useMemo(() => {
+    const handles = Object.values(debtHandles).filter(h => h && h !== ethers.ZeroHash);
+    if (handles.length === 0) return undefined;
+    return handles.map(handle => ({ handle, contractAddress: FHESplitAddress } as const));
+  }, [debtHandles]);
+
+  // Decrypt the net owed amount
+  const {
+    canDecrypt,
+    decrypt: decryptNetOwed,
+    isDecrypting,
+    message: decryptMsg,
+    results: decryptResults,
+  } = useFHEDecrypt({
+    instance,
+    ethersSigner: ethersSigner as any,
+    fhevmDecryptionSignatureStorage,
+    chainId,
+    requests: decryptRequests,
+  });
+
+  // Update message when decryption messages change
+  useEffect(() => {
+    if (decryptMsg) setMessage(decryptMsg);
+  }, [decryptMsg]);
+
+  // Get the clear (decrypted) values mapped by creditor address
+  const decryptedDebts = useMemo(() => {
+    const debts: Record<string, bigint> = {};
+    
+    for (const [creditor, handle] of Object.entries(debtHandles)) {
+      if (handle === ethers.ZeroHash) {
+        debts[creditor] = BigInt(0);
+      } else {
+        const clear = decryptResults[handle];
+        if (typeof clear === "bigint") {
+          debts[creditor] = clear;
+        }
+      }
+    }
+    
+    return debts;
+  }, [debtHandles, decryptResults]);
+
+  // Creditors are members to whom the user owes money (non-zero debt)
+  const creditors = useMemo(() => {
+    return Object.keys(debtHandles).filter(creditor => {
+      const debt = decryptedDebts[creditor];
+      return debt !== undefined && debt > 0;
+    });
+  }, [debtHandles, decryptedDebts]);
+
+  // Function to pay/settle debt
+  const payDebt = useCallback(
+    async (creditor: string, amount: bigint) => {
+      if (isProcessing || !hasSigner || groupId === undefined) {
+        setMessage("Cannot pay debt: missing requirements");
+        return false;
+      }
+
+      setIsProcessing(true);
+      setMessage("Encrypting payment amount...");
+
+      try {
+        if (!ethers.isAddress(creditor)) {
+          setMessage("Invalid creditor address");
+          setIsProcessing(false);
+          return false;
+        }
+
+        const userAddress = await ethersSigner?.getAddress();
+        if (!userAddress) {
+          setMessage("Unable to get user address");
+          setIsProcessing(false);
+          return false;
+        }
+
+        // Encrypt the payment amount
+        const encrypted = await instance
+          ?.createEncryptedInput(FHESplitAddress, userAddress)
+          .add64(amount)
+          .encrypt();
+
+        if (!encrypted) {
+          setMessage("Encryption failed");
+          setIsProcessing(false);
+          return false;
+        }
+
+        const handleHex = "0x" + Buffer.from(encrypted.handles[0]).toString("hex");
+        const proofHex = "0x" + Buffer.from(encrypted.inputProof).toString("hex");
+
+        setMessage("Submitting payment transaction...");
+
+        const writeContract = getContract("write");
+        if (!writeContract) {
+          setMessage("Contract not available");
+          setIsProcessing(false);
+          return false;
+        }
+
+        const tx = await writeContract.privateTransferInGroup(BigInt(groupId), creditor, handleHex, proofHex);
+
+        setMessage("Waiting for transaction confirmation...");
+        await tx.wait();
+
+        setMessage("Payment successful!");
+        return true;
+      } catch (e) {
+        const error = e as Error;
+        console.error("Error paying debt:", error);
+        setMessage(`Failed to pay debt: ${error.message}`);
+        return false;
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [isProcessing, hasSigner, groupId, instance, ethersSigner, getContract],
+  );
+
   // Add expense function
   const addExpense = useCallback(
     async (params: {
@@ -277,7 +440,7 @@ export const useFHESplitWagmi = (parameters: {
         for (let i = 0; i < shares.length; i++) {
           const share = shares[i];
           console.log(`Encrypting share ${i + 1}/${shares.length}: ${share}`);
-          
+
           const encrypted = await instance
             .createEncryptedInput(FHESplitAddress, userAddress)
             .add64(share)
@@ -352,6 +515,12 @@ export const useFHESplitWagmi = (parameters: {
     expenseIds,
     isLoadingExpenses,
     fetchExpenses,
+    payDebt,
+    decryptedDebts,
+    creditors,
+    canDecrypt,
+    decryptNetOwed,
+    isDecrypting,
     message,
     isProcessing,
     isRefreshing: readMembersResult.isFetching,

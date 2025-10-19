@@ -1,6 +1,7 @@
 export interface GroupMember {
   id: string;
   name: string;
+  address: string;
   avatar?: string;
   balance?: number;
   isCurrentUser?: boolean;
