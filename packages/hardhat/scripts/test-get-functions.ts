@@ -35,7 +35,7 @@ const CONTRACT_ADDRESS_OVERRIDE = "0xbFBc56979dBfA4514C6560e5E9d33Ff608117ce5"; 
 const USER_ADDRESS = "";
 
 // Update these for specific tests
-const GROUP_ID = 1n;
+const GROUP_ID = 2n;
 const EXPENSE_ID = 1n;
 const DEBTOR_ADDRESS = "0xd4de553ABD6D11d9707CcB6Cc8d520D55010DdCC"; // YOU (the person who owes)
 const CREDITOR_ADDRESS = "0x97D2eEb65DA0c37dc0F43FF4691E521673eFADfd"; // PAYER (the person you owe)
@@ -248,23 +248,52 @@ async function main() {
   // ==========================================
   // TEST 4: getDebtorsInGroup
   // ==========================================
-  // printSection("TEST 4: getDebtorsInGroup");
-  // try {
-  //   const debtors = await fheSplit.connect(signer).getDebtorsInGroup(GROUP_ID, userAddr);
-  //   console.log("✅ Group ID:", GROUP_ID.toString());
-  //   console.log("✅ User:", formatAddress(userAddr));
-  //   console.log("✅ Number of Debtors:", debtors.length);
-  //   if (debtors.length > 0) {
-  //     console.log("\n📋 Debtors (people who owe you):");
-  //     debtors.forEach((debtor, i) => {
-  //       console.log(`  ${i + 1}. ${debtor}`);
-  //     });
-  //   } else {
-  //     console.log("✨ No debtors (nobody owes you in this group)");
-  //   }
-  // } catch (error) {
-  //   console.log("❌ Error:", (error as Error).message);
-  // }
+  printSection("TEST 4: getDebtorsInGroup - Who Owes You & How Much");
+  try {
+    const debtors = await fheSplit.connect(signer).getDebtorsInGroup(GROUP_ID, userAddr);
+    console.log("✅ Group ID:", GROUP_ID.toString());
+    console.log("✅ User:", formatAddress(userAddr));
+    console.log("✅ Number of Debtors:", debtors.length);
+
+    if (debtors.length > 0) {
+      console.log("\n💰 Debtors (people who owe you):");
+
+      // Loop through each debtor and get the amount
+      for (let i = 0; i < debtors.length; i++) {
+        const debtor = debtors[i];
+
+        // Get the encrypted debt amount
+        const encryptedOwed = await fheSplit
+          .connect(signer)
+          .getNetOwedInGroup(GROUP_ID, debtor, userAddr);
+
+        // Decrypt the amount
+        const owed = await decryptAmount(encryptedOwed, contractAddress, signer);
+
+        if (owed > 0n) {
+          console.log(`  ${i + 1}. ${debtor}`);
+          console.log(`     💰 Owes you: ${formatAmount(owed)} tokens (${owed.toString()} wei)`);
+        } else {
+          console.log(`  ${i + 1}. ${debtor} (settled/no debt)`);
+        }
+      }
+
+      // Calculate total owed to you
+      let totalOwedToYou = 0n;
+      for (const debtor of debtors) {
+        const encryptedOwed = await fheSplit.connect(signer).getNetOwedInGroup(GROUP_ID, debtor, userAddr);
+        const owed = await decryptAmount(encryptedOwed, contractAddress, signer);
+        totalOwedToYou += owed;
+      }
+
+      console.log("\n📊 Total Owed to You in this Group:", formatAmount(totalOwedToYou), "tokens");
+
+    } else {
+      console.log("✨ No debtors (nobody owes you in this group)");
+    }
+  } catch (error) {
+    console.log("❌ Error:", (error as Error).message);
+  }
 
   // ==========================================
   // TEST 5: getUserGroups
