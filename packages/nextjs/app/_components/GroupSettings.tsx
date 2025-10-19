@@ -75,73 +75,6 @@ export const GroupSettings = () => {
     },
   ]);
 
-  // Mock expenses that align with the smart contract structure
-  const [expenses] = useState<ExpenseWithShares[]>([
-    {
-      id: "1",
-      groupId: "1",
-      payer: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
-      payerName: "Sarah Johnson",
-      description: "Hotel Booking",
-      createdAt: Math.floor(new Date("2024-10-15").getTime() / 1000),
-      exists: true,
-      shares: [
-        { member: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0", memberName: "Sarah Johnson", amount: BigInt(112.5e18) },
-        { member: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4", memberName: "Mike Chen", amount: BigInt(112.5e18) },
-        { member: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", memberName: "Alex Rivera", amount: BigInt(112.5e18) },
-        { member: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db", memberName: "You", amount: BigInt(112.5e18) },
-      ],
-      totalAmount: BigInt(450e18),
-    },
-    {
-      id: "2",
-      groupId: "1",
-      payer: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db",
-      payerName: "You",
-      description: "Dinner at Italian Restaurant",
-      createdAt: Math.floor(new Date("2024-10-16").getTime() / 1000),
-      exists: true,
-      shares: [
-        { member: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0", memberName: "Sarah Johnson", amount: BigInt(40.17e18) },
-        { member: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4", memberName: "Mike Chen", amount: BigInt(40.17e18) },
-        { member: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db", memberName: "You", amount: BigInt(40.16e18) },
-      ],
-      totalAmount: BigInt(120.5e18),
-    },
-    {
-      id: "3",
-      groupId: "1",
-      payer: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
-      payerName: "Mike Chen",
-      description: "Gas for Road Trip",
-      createdAt: Math.floor(new Date("2024-10-16").getTime() / 1000),
-      exists: true,
-      shares: [
-        { member: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0", memberName: "Sarah Johnson", amount: BigInt(21.25e18) },
-        { member: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4", memberName: "Mike Chen", amount: BigInt(21.25e18) },
-        { member: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", memberName: "Alex Rivera", amount: BigInt(21.25e18) },
-        { member: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db", memberName: "You", amount: BigInt(21.25e18) },
-      ],
-      totalAmount: BigInt(85e18),
-    },
-    {
-      id: "4",
-      groupId: "1",
-      payer: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2",
-      payerName: "Alex Rivera",
-      description: "Grocery Shopping",
-      createdAt: Math.floor(new Date("2024-10-17").getTime() / 1000),
-      exists: true,
-      shares: [
-        { member: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0", memberName: "Sarah Johnson", amount: BigInt(16.81e18) },
-        { member: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4", memberName: "Mike Chen", amount: BigInt(16.81e18) },
-        { member: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2", memberName: "Alex Rivera", amount: BigInt(16.81e18) },
-        { member: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db", memberName: "You", amount: BigInt(16.82e18) },
-      ],
-      totalAmount: BigInt(67.25e18),
-    },
-  ]);
-
   const handleRemoveMember = async (id: string) => {
     // Find member by id
     const member = members.find(m => m.id === id);
@@ -307,7 +240,36 @@ export const GroupSettings = () => {
           </div>
         </ModalButton>
 
-        <ExpensesHistory expenses={expenses} />
+        {fheSplit.isLoadingExpenses ? (
+          <div className="text-center py-8">Loading expenses...</div>
+        ) : (
+          <div>
+            <h3 className="text-lg font-semibold mb-4">Expenses ({fheSplit.expenses.length})</h3>
+            <div className="space-y-3">
+              {fheSplit.expenses.map((expense: any, index: number) => (
+                <div key={index} className="bg-base-200 rounded-xl p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-semibold">{expense.description}</h4>
+                      <p className="text-sm text-base-content/70">
+                        Payer: {expense.payer.slice(0, 6)}...{expense.payer.slice(-4)}
+                      </p>
+                      <p className="text-xs text-base-content/50">
+                        {new Date(Number(expense.createdAt) * 1000).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-base-content/50">ID: {expense.id.toString()}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {fheSplit.expenses.length === 0 && (
+                <div className="text-center py-8 text-base-content/50">No expenses yet</div>
+              )}
+            </div>
+          </div>
+        )}
 
         <GroupMembersList
           members={members}

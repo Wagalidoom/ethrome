@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWagmiEthers } from "../wagmi/useWagmiEthers";
 import { FhevmInstance } from "@fhevm-sdk";
 import { ethers } from "ethers";
@@ -21,18 +21,22 @@ export const useFHESplitWagmi = (parameters: {
 
   const [message, setMessage] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [isLoadingExpenses, setIsLoadingExpenses] = useState<boolean>(false);
 
   // Helpers
   const hasProvider = Boolean(ethersReadonlyProvider);
   const hasSigner = Boolean(ethersSigner);
 
-  const getContract = (mode: "read" | "write") => {
-    const providerOrSigner = mode === "read" ? ethersReadonlyProvider : ethersSigner;
-    if (!providerOrSigner) return undefined;
-    return new ethers.Contract(FHESplitAddress, FHESplit_ABI, providerOrSigner);
-  };
+  const getContract = useCallback(
+    (mode: "read" | "write") => {
+      const providerOrSigner = mode === "read" ? ethersReadonlyProvider : ethersSigner;
+      if (!providerOrSigner) return undefined;
+      return new ethers.Contract(FHESplitAddress, FHESplit_ABI, providerOrSigner);
+    },
+    [ethersReadonlyProvider, ethersSigner],
+  );
 
-  // Read group members via wagmi
   const readMembersResult = useReadContract({
     address: FHESplitAddress,
     abi: FHESplit_ABI,
@@ -44,9 +48,26 @@ export const useFHESplitWagmi = (parameters: {
     },
   });
 
+  // Read expense IDs for the group
+  const readExpenseIdsResult = useReadContract({
+    address: FHESplitAddress,
+    abi: FHESplit_ABI,
+    functionName: "getGroupExpenses",
+    args: [BigInt(groupId)],
+    query: {
+      enabled: Boolean(hasProvider && groupId),
+      refetchOnWindowFocus: false,
+    },
+  });
+
   const groupMembers = useMemo(
     () => (readMembersResult.data as string[] | undefined) ?? [],
     [readMembersResult.data],
+  );
+
+  const expenseIds = useMemo(
+    () => (readExpenseIdsResult.data as bigint[] | undefined) ?? [],
+    [readExpenseIdsResult.data],
   );
 
   const refreshMembers = useCallback(async () => {
@@ -54,7 +75,44 @@ export const useFHESplitWagmi = (parameters: {
     if (res.error) setMessage("Failed to fetch members: " + (res.error as Error).message);
   }, [readMembersResult]);
 
-  // Read group info
+  // Fetch all expenses for the group
+  const fetchExpenses = useCallback(async () => {
+    if (!hasProvider || expenseIds.length === 0) {
+      setExpenses([]);
+      return;
+    }
+
+    setIsLoadingExpenses(true);
+    try {
+      const readContract = getContract("read");
+      if (!readContract) {
+        console.error("Contract not available");
+        setIsLoadingExpenses(false);
+        return;
+      }
+
+      const expensePromises = expenseIds.map(id => readContract.getExpense(id));
+      const expensesData = await Promise.all(expensePromises);
+
+      console.log("Fetched expenses:", expensesData);
+      setExpenses(expensesData);
+    } catch (error) {
+      console.error("Error fetching expenses:", error);
+    } finally {
+      setIsLoadingExpenses(false);
+    }
+  }, [hasProvider, expenseIds, getContract]);
+
+  // Auto-fetch expenses when expense IDs change
+  useEffect(() => {
+    if (expenseIds.length > 0) {
+      fetchExpenses();
+    } else {
+      setExpenses([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseIds.length, hasProvider]);
+
   const readGroupResult = useReadContract({
     address: FHESplitAddress,
     abi: FHESplit_ABI,
@@ -290,6 +348,10 @@ export const useFHESplitWagmi = (parameters: {
     removeMember,
     addExpense,
     refreshMembers,
+    expenses,
+    expenseIds,
+    isLoadingExpenses,
+    fetchExpenses,
     message,
     isProcessing,
     isRefreshing: readMembersResult.isFetching,
