@@ -30,7 +30,7 @@ export const GroupSettings = () => {
   });
 
   // Mock group ID - replace with actual group ID from props or route
-  const groupId = 1;
+  const groupId = 2;
 
   // FHESplit hook
   const fheSplit = useFHESplitWagmi({

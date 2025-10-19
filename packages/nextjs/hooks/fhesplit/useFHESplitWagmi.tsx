@@ -7,7 +7,7 @@ import { ethers } from "ethers";
 import { useReadContract } from "wagmi";
 import FHESplit_ABI from "~~/utils/abi/FHESplit";
 
-const FHESplitAddress = '0x2251B8c53a1B766Aa28917D52A5E3362c2D2f022';
+const FHESplitAddress = '0xbFBc56979dBfA4514C6560e5E9d33Ff608117ce5';
 
 export const useFHESplitWagmi = (parameters: {
   instance: FhevmInstance | undefined;
