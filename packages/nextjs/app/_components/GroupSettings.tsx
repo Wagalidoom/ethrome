@@ -48,20 +48,7 @@ export const GroupSettings = () => {
   const [addresses, setAddresses] = useState("");
   const [shares, setShares] = useState("");
 
-  // Debt management state
-  const [selectedCreditor, setSelectedCreditor] = useState<string | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  
-  // Auto-decrypt debts when possible
-  const hasDecryptableDebts = fheSplit.canDecrypt && !fheSplit.isDecrypting && fheSplit.creditors.length > 0;
-  
-  // Trigger decryption once when debts are available
-  const [hasTriggeredDecrypt, setHasTriggeredDecrypt] = useState(false);
-  
-  if (hasDecryptableDebts && !hasTriggeredDecrypt) {
-    fheSplit.decryptNetOwed();
-    setHasTriggeredDecrypt(true);
-  }
+  // No state needed for simple test transaction
 
   // Mock members for UI - in production, fetch from contract
   const [members, setMembers] = useState<GroupMember[]>([
@@ -156,17 +143,8 @@ export const GroupSettings = () => {
     // Implement invite via link logic
   };
 
-  // Handle pay debt
   const handlePayDebt = async (creditor: string) => {
-    if (!paymentAmount || !creditor) return;
-    
-    const amountWei = BigInt(Math.floor(parseFloat(paymentAmount) * 1e18));
-    const success = await fheSplit.payDebt(creditor, amountWei);
-    
-    if (success) {
-      setPaymentAmount("");
-      setSelectedCreditor(null);
-    }
+    await fheSplit.payDebt(creditor, BigInt(1000000000000000)); // 0.001 ETH
   };
 
   const handleAddExpense = async () => {
@@ -174,7 +152,7 @@ export const GroupSettings = () => {
       .split(",")
       .map(a => a.trim())
       .filter(Boolean);
-    
+
     const shareValues = shares
       .split(",")
       .map(s => s.trim())
@@ -306,20 +284,11 @@ export const GroupSettings = () => {
         {/* My Debts Section */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold">My Debts</h3>
-          {fheSplit.isDecrypting ? (
-            <div className="bg-base-200 rounded-xl p-8 text-center">
-              <p className="text-base-content/50">Decrypting debts...</p>
-            </div>
-          ) : fheSplit.creditors.length === 0 ? (
-            <div className="bg-base-200 rounded-xl p-8 text-center">
-              <p className="text-base-content/50">No debts! 🎉</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {fheSplit.creditors.map((creditor: string) => {
-                const debtAmountBigInt = fheSplit.decryptedDebts[creditor];
-                const debtAmount = debtAmountBigInt ? Number(debtAmountBigInt) / 1e18 : null;
-
+          <div className="space-y-3">
+            {(fheSplit.groupMembers.length > 0 ? fheSplit.groupMembers : members.map(m => m.address).filter(Boolean))
+              .filter((member: string) => member.toLowerCase() !== userAddress?.toLowerCase())
+              .map((creditor: string) => {
+                const debtAmountEth = 0.001;
                 return (
                   <div key={creditor} className="bg-base-200 rounded-xl p-4">
                     <div className="flex justify-between items-start">
@@ -328,64 +297,30 @@ export const GroupSettings = () => {
                         <p className="font-semibold">
                           {creditor.slice(0, 6)}...{creditor.slice(-4)}
                         </p>
-                        {debtAmount !== null ? (
-                          <p className="text-xl font-bold text-red-400 mt-2">
-                            {debtAmount.toFixed(4)} ETH
-                          </p>
-                        ) : (
-                          <p className="text-sm text-base-content/50 mt-2">Loading...</p>
-                        )}
+                        <p className="text-base-content/50">{debtAmountEth} ETH</p>
                       </div>
                       <div className="flex flex-col gap-2">
-                        {debtAmount !== null && (
-                          <>
-                            {selectedCreditor === creditor ? (
-                              <div className="flex flex-col gap-2">
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={paymentAmount}
-                                  onChange={e => setPaymentAmount(e.target.value)}
-                                  placeholder="Amount (ETH)"
-                                  className="px-3 py-2 bg-base-300 rounded-lg text-sm w-32"
-                                  disabled={fheSplit.isProcessing}
-                                />
-                                <button
-                                  onClick={() => handlePayDebt(creditor)}
-                                  disabled={!paymentAmount || fheSplit.isProcessing}
-                                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg text-sm"
-                                >
-                                  {fheSplit.isProcessing ? "Paying..." : "Confirm"}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setSelectedCreditor(null);
-                                    setPaymentAmount("");
-                                  }}
-                                  disabled={fheSplit.isProcessing}
-                                  className="px-4 py-2 bg-base-300 hover:bg-base-100 rounded-lg text-sm"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setSelectedCreditor(creditor)}
-                                disabled={fheSplit.isProcessing}
-                                className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg text-sm"
-                              >
-                                Pay Debt
-                              </button>
-                            )}
-                          </>
-                        )}
+                        <button
+                          onClick={() => handlePayDebt(creditor)}
+                          disabled={fheSplit.isProcessing}
+                          className="btn btn-sm btn-primary"
+                        >
+                          Pay
+                        </button>
                       </div>
                     </div>
                   </div>
                 );
               })}
-            </div>
-          )}
+            {(fheSplit.groupMembers.length > 0
+              ? fheSplit.groupMembers
+              : members.map(m => m.address).filter(Boolean)
+            ).filter((member: string) => member.toLowerCase() !== userAddress?.toLowerCase()).length === 0 && (
+              <div className="bg-base-200 rounded-xl p-8 text-center">
+                <p className="text-base-content/50">No other members in the group</p>
+              </div>
+            )}
+          </div>
         </div>
 
         <GroupMembersList

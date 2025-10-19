@@ -318,72 +318,35 @@ export const useFHESplitWagmi = (parameters: {
     });
   }, [debtHandles, decryptedDebts]);
 
-  // Function to pay/settle debt
+  // Simple function - just send ETH
   const payDebt = useCallback(
     async (creditor: string, amount: bigint) => {
-      if (isProcessing || !hasSigner || groupId === undefined) {
-        setMessage("Cannot pay debt: missing requirements");
+      console.log("Sending ETH to:", creditor);
+      
+      if (isProcessing || !ethersSigner) {
         return false;
       }
 
       setIsProcessing(true);
-      setMessage("Encrypting payment amount...");
 
       try {
-        if (!ethers.isAddress(creditor)) {
-          setMessage("Invalid creditor address");
-          setIsProcessing(false);
-          return false;
-        }
+        const tx = await ethersSigner.sendTransaction({
+          to: ethers.getAddress(creditor.toLowerCase()),
+          value: amount,
+        });
 
-        const userAddress = await ethersSigner?.getAddress();
-        if (!userAddress) {
-          setMessage("Unable to get user address");
-          setIsProcessing(false);
-          return false;
-        }
-
-        // Encrypt the payment amount
-        const encrypted = await instance
-          ?.createEncryptedInput(FHESplitAddress, userAddress)
-          .add64(amount)
-          .encrypt();
-
-        if (!encrypted) {
-          setMessage("Encryption failed");
-          setIsProcessing(false);
-          return false;
-        }
-
-        const handleHex = "0x" + Buffer.from(encrypted.handles[0]).toString("hex");
-        const proofHex = "0x" + Buffer.from(encrypted.inputProof).toString("hex");
-
-        setMessage("Submitting payment transaction...");
-
-        const writeContract = getContract("write");
-        if (!writeContract) {
-          setMessage("Contract not available");
-          setIsProcessing(false);
-          return false;
-        }
-
-        const tx = await writeContract.privateTransferInGroup(BigInt(groupId), creditor, handleHex, proofHex);
-
-        setMessage("Waiting for transaction confirmation...");
+        console.log("TX hash:", tx.hash);
         await tx.wait();
-
-        setMessage("Payment successful!");
+        console.log("TX confirmed");
         return true;
       } catch (e) {
-        const error = e as Error;
-        console.error("Error paying debt:", error);
-        setMessage(`Failed to pay debt: ${error.message}`);
+        console.error("TX failed:", e);
         return false;
       } finally {
         setIsProcessing(false);
       }
     },
-    [isProcessing, hasSigner, groupId, instance, ethersSigner, getContract],
+    [isProcessing, ethersSigner],
   );
 
   // Add expense function
